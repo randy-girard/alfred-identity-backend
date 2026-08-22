@@ -103,6 +103,26 @@ func TestLoadMinimal(t *testing.T) {
 	}
 }
 
+func TestLoadSSOSourceNamePrefersSSO_SOURCE_NAME(t *testing.T) {
+	key := make([]byte, 32)
+	for i := range key {
+		key[i] = byte(i + 1)
+	}
+	t.Setenv("DATA_ENCRYPTION_KEY", base64.StdEncoding.EncodeToString(key))
+	t.Setenv("DISCORD_ENABLED", "false")
+	t.Setenv("WEB_ENABLED", "false")
+	t.Setenv("SSO_SOURCE_NAME", "Guild SSO")
+	t.Setenv("WEB_SSO_SOURCE_NAME", "Legacy Name")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.WebSSOSourceName != "Guild SSO" {
+		t.Fatalf("source name %q", cfg.WebSSOSourceName)
+	}
+}
+
 func TestLoadRequiresEncryptionKey(t *testing.T) {
 	t.Setenv("DATA_ENCRYPTION_KEY", "")
 	if _, err := Load(); err == nil {

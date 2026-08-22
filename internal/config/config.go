@@ -27,7 +27,7 @@ type Config struct {
 	WebEnabled             bool
 	WebPublicURL           string
 	WebAccessRoleID        string // empty → DiscordAdminRoleID
-	WebSSOSourceName       string // display name in /sso-source.json
+	WebSSOSourceName       string // display name in Discord /sso get JSON and /sso-source.json (SSO_SOURCE_NAME or WEB_SSO_SOURCE_NAME)
 	PresenceTTL            time.Duration
 	LoginAuthRatePerMin    int
 }
@@ -65,7 +65,7 @@ func Load() (Config, error) {
 		WebEnabled:             envBool("WEB_ENABLED", false),
 		WebPublicURL:           strings.TrimRight(strings.TrimSpace(os.Getenv("WEB_PUBLIC_URL")), "/"),
 		WebAccessRoleID:        strings.TrimSpace(os.Getenv("WEB_ACCESS_ROLE_ID")),
-		WebSSOSourceName:       strings.TrimSpace(os.Getenv("WEB_SSO_SOURCE_NAME")),
+		WebSSOSourceName:       firstNonEmpty(strings.TrimSpace(os.Getenv("SSO_SOURCE_NAME")), strings.TrimSpace(os.Getenv("WEB_SSO_SOURCE_NAME"))),
 		PresenceTTL:            time.Duration(envInt("PRESENCE_TTL_SECONDS", 90)) * time.Second,
 		LoginAuthRatePerMin:    envInt("LOGIN_AUTH_RATE_LIMIT_PER_MIN", 30),
 	}
@@ -119,6 +119,15 @@ func ValidateDiscordCommandPrefix(p string) error {
 		return fmt.Errorf("DISCORD_COMMAND_PREFIX too long (%d); prefix+command must be ≤32 chars", len(p))
 	}
 	return nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func envOr(k, def string) string {

@@ -26,7 +26,7 @@ Bootstrap Discord user IDs in `DISCORD_BOOTSTRAP_ADMIN_IDS` can always open the 
 
 Public (no login): `{WEB_PUBLIC_URL}/sso-source.json`
 
-Members paste that URL (or just the origin) into the desktop app → **Connections → Add from URL**. Optional display name: `WEB_SSO_SOURCE_NAME`.
+Members paste that URL (or just the origin) into the desktop app → **Connections → Add from URL**. Optional display name: `SSO_SOURCE_NAME` (or legacy `WEB_SSO_SOURCE_NAME`).
 
 Settings → **GUI source URL** also shows a copy button.
 
