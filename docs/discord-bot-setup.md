@@ -22,9 +22,9 @@
 
 Users: `/alfred-identity-sso create` → paste into **Alfred Identity**. Base accounts show up automatically.
 
-On the **Groups** tab in **alfred-identity-backend**, you can restrict who may use Discord slash commands (`/sso`, `/whoami`). When any group enables a command, only members of groups with that command can use it. Discord bootstrap admins and the configured admin role bypass restrictions.
+On the **Groups** tab in **Alfred Identity Management**, you can restrict who may use Discord slash commands (`/sso`, `/whoami`). When any group enables a command, only members of groups with that command can use it. Discord bootstrap admins and the configured admin role bypass restrictions.
 
-EQ accounts, aliases, tags, characters, private Local → Share access, and user access are managed in **Alfred Identity** or **alfred-identity-backend** web admin.
+EQ accounts, aliases, tags, characters, private Local → Share access, and user access are managed in **Alfred Identity** or **Alfred Identity Management**.
 
 Discord roles for elevated access are kept fresh automatically:
 - On bot startup and every `DISCORD_ROLE_SYNC_SECONDS` (default 5 minutes)

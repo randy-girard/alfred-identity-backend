@@ -12,7 +12,7 @@ func (s *Server) handleDenied(w http.ResponseWriter, r *http.Request) {
 	}
 	reason := r.URL.Query().Get("reason")
 	title := "Access denied"
-	detail := "Your Discord account is not allowed to use the " + AppName + " web admin."
+	detail := "Your Discord account is not allowed to use " + AppName + "."
 	switch reason {
 	case "revoked":
 		title = "SSO access revoked"
