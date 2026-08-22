@@ -2,6 +2,9 @@ package web
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -176,5 +179,28 @@ func TestRedirectURI(t *testing.T) {
 	want := "http://127.0.0.1:8181/admin/oauth/callback"
 	if got := s.redirectURI(); got != want {
 		t.Fatalf("got %q want %q", got, want)
+	}
+}
+
+func TestParseSessionExpiredAndCorrupt(t *testing.T) {
+	s := testServer(t)
+	tok, err := s.signSession(Session{UserID: 1, ExpiresAt: time.Now().Add(-time.Hour).Unix()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.parseSession(tok); err == nil {
+		t.Fatal("expected expired")
+	}
+	payload := base64.RawURLEncoding.EncodeToString([]byte("not-json"))
+	mac := hmac.New(sha256.New, s.sessionKey)
+	_, _ = mac.Write([]byte(payload))
+	sig := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+	if _, err := s.parseSession(payload + "." + sig); err == nil {
+		t.Fatal("expected unmarshal error")
+	}
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: ""})
+	if _, err := s.sessionFromRequest(req); err == nil {
+		t.Fatal("empty cookie")
 	}
 }
