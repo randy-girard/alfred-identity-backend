@@ -133,7 +133,6 @@ func main() {
 		webSrv.Mount(mux)
 		logger.Info("web admin enabled",
 			"url", cfg.WebPublicURL+web.BasePath+"/",
-			"sso_source", cfg.WebPublicURL+web.SSOSourcePath,
 			"access_role", cfg.WebAccessRoleID,
 		)
 	}

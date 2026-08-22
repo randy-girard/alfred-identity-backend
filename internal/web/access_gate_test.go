@@ -42,33 +42,6 @@ func TestRejectIfReadonly(t *testing.T) {
 	}
 }
 
-func TestSSOSourceHEADAndErrors(t *testing.T) {
-	s := &Server{publicURL: "http://127.0.0.1:8181", sourceName: "Guild"}
-	mux := http.NewServeMux()
-	s.Mount(mux)
-
-	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodHead, SSOSourcePath, nil))
-	if rec.Code != http.StatusOK || rec.Body.Len() != 0 {
-		t.Fatalf("HEAD: %d body=%q", rec.Code, rec.Body.String())
-	}
-
-	rec = httptest.NewRecorder()
-	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, SSOSourcePath, nil))
-	if rec.Code != http.StatusMethodNotAllowed {
-		t.Fatalf("POST: %d", rec.Code)
-	}
-
-	s2 := &Server{publicURL: ""}
-	mux2 := http.NewServeMux()
-	s2.Mount(mux2)
-	rec = httptest.NewRecorder()
-	mux2.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, SSOSourcePath, nil))
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("empty publicURL: %d %s", rec.Code, rec.Body.String())
-	}
-}
-
 func TestSpaHandlerReservedPaths(t *testing.T) {
 	s := testServer(t)
 	h := s.spaHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

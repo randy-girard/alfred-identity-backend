@@ -112,7 +112,6 @@ func (s *Server) Mount(mux *http.ServeMux) {
 	mux.HandleFunc(BasePath+"/api/groups/", s.requireAuth(s.handleGroupSub))
 	mux.HandleFunc(BasePath+"/api/audit", s.requireAuth(s.handleAudit))
 	mux.HandleFunc(BasePath+"/api/settings/backup", s.requireAdmin(s.handleSettingsBackup))
-	mux.HandleFunc(SSOSourcePath, s.handleSSOSourceJSON)
 
 	mux.HandleFunc(BasePath, func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, BasePath+"/", http.StatusFound)
