@@ -5,7 +5,7 @@ Go service for Discord-managed EQ bot/SSO accounts, Postgres-backed secrets (AES
 ## Quick start (Docker Compose)
 
 ```bash
-cd alfred-identity-web
+cd alfred-identity-backend
 cp .env.example .env
 # Set DATA_ENCRYPTION_KEY (32 bytes base64): openssl rand -base64 32
 # Optional: Discord token, guild, bootstrap admin IDs — or leave DISCORD_ENABLED=false
@@ -54,7 +54,7 @@ Useful Discord commands: SSO tokens (`create` / `get` / `list` / `revoke`) and w
 - [docs/ws-api.md](docs/ws-api.md) — WebSocket contract (mirrored in the GUI)
 - [docs/web-admin.md](docs/web-admin.md) — Discord OAuth web admin
 - [docs/deploy-tls.md](docs/deploy-tls.md) — external TLS reverse proxy
-- [../alfred-identity-app/README.md](../alfred-identity-app/README.md) — Alfred Identity desktop app (`alfred-identity` project)
+- [../alfred-identity/README.md](../alfred-identity/README.md) — Alfred Identity desktop app
 
 ## Build (binary only)
 
