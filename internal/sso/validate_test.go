@@ -58,6 +58,9 @@ func TestValidateFields(t *testing.T) {
 	if err := validateCharacter(strings.Repeat("c", 65)); err == nil {
 		t.Fatal("char too long")
 	}
+	if err := validateTag("ok"); err != nil {
+		t.Fatal(err)
+	}
 	if err := validateCharacter("Hero"); err != nil {
 		t.Fatal(err)
 	}
