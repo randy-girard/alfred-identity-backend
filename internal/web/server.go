@@ -103,6 +103,7 @@ func (s *Server) Mount(mux *http.ServeMux) {
 
 	mux.HandleFunc(BasePath+"/api/me", s.requireAuth(s.handleMe))
 	mux.HandleFunc(BasePath+"/api/state", s.requireAuth(s.handleState))
+	mux.HandleFunc(BasePath+"/api/metrics", s.requireAuth(s.handleMetrics))
 	mux.HandleFunc(BasePath+"/api/accounts/import", s.requireAdmin(s.handleAccountsImport))
 	mux.HandleFunc(BasePath+"/api/accounts/export", s.requireAdmin(s.handleAccountsExport))
 	mux.HandleFunc(BasePath+"/api/accounts", s.requireAdmin(s.handleAccounts))

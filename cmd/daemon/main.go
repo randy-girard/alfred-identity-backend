@@ -17,6 +17,7 @@ import (
 	"github.com/alfred-identity/web/internal/db"
 	"github.com/alfred-identity/web/internal/discord"
 	"github.com/alfred-identity/web/internal/httpapi"
+	"github.com/alfred-identity/web/internal/metrics"
 	"github.com/alfred-identity/web/internal/presence"
 	"github.com/alfred-identity/web/internal/sso"
 	"github.com/alfred-identity/web/internal/store"
@@ -90,6 +91,18 @@ func main() {
 		Log:               logger,
 	}
 	hub.SetRatePerMin(cfg.LoginAuthRatePerMin)
+
+	metricsSampler := &metrics.Sampler{
+		Store: st,
+		Log:   logger,
+		Sources: metrics.Sources{
+			GUIConnections: func() int { return len(hub.Connections()) },
+			GameSessions:   pres.Count,
+			DBPingLatency:  metrics.PingLatencyMS(sqlDB),
+			DBPoolStats:    metrics.PoolStats(sqlDB),
+		},
+	}
+	go metricsSampler.Run(ctx)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", httpapi.Health(func() bool {

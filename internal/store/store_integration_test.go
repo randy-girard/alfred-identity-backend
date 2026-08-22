@@ -173,6 +173,53 @@ func TestTokenCreateRevoke(t *testing.T) {
 	}
 }
 
+func TestMetricsRecordAndQuery(t *testing.T) {
+	st := openTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Minute)
+	values := map[string]float64{
+		store.MetricGUIConnections: 4,
+		store.MetricGameSessions:   2,
+		store.MetricDBLatencyMS:    3.5,
+	}
+	if err := st.RecordMetricSamples(ctx, now, values); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.RecordMetricSamples(ctx, now.Add(2*time.Minute), map[string]float64{
+		store.MetricGUIConnections: 6,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	series, err := st.QueryMetricSeries(ctx, now.Add(-time.Hour), time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gui := series[store.MetricGUIConnections]
+	if len(gui) == 0 {
+		t.Fatalf("series=%v", series)
+	}
+	last := gui[len(gui)-1].V
+	if last < 4 || last > 6 {
+		t.Fatalf("avg=%v points=%v", last, gui)
+	}
+}
+
+func TestPurgeMetricsOlderThan(t *testing.T) {
+	st := openTestStore(t)
+	ctx := context.Background()
+	old := time.Now().UTC().Add(-100 * 24 * time.Hour)
+	if err := st.RecordMetricSamples(ctx, old, map[string]float64{store.MetricGUIConnections: 1}); err != nil {
+		t.Fatal(err)
+	}
+	n, err := st.PurgeMetricsOlderThan(ctx, time.Now().UTC().Add(-90*24*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n < 1 {
+		t.Fatalf("purged=%d", n)
+	}
+}
+
 func randHex(n int) string {
 	b := make([]byte, n)
 	_, _ = rand.Read(b)

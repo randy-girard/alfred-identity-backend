@@ -44,7 +44,10 @@ let tab = 'overview'
 let busy = false
 let ws = null
 let connDurationTimer = null
+let metricsRefreshTimer = null
 let liveConnected = false
+let metricsRange = '24h'
+let metricsData = null
 let auditEntries = []
 let auditOffset = 0
 let auditLoading = false
@@ -270,6 +273,100 @@ function metric(label, value, tabId, hint) {
   </button>`
 }
 
+const METRIC_SERIES = [
+  { key: 'gui_connections', label: 'GUI WebSocket clients', unit: '' },
+  { key: 'game_sessions', label: 'In-game sessions', unit: '' },
+  { key: 'db_latency_ms', label: 'DB ping latency', unit: 'ms' },
+  { key: 'db_open_connections', label: 'DB pool (open)', unit: '' },
+  { key: 'db_in_use_connections', label: 'DB pool (in use)', unit: '' },
+  { key: 'db_idle_connections', label: 'DB pool (idle)', unit: '' },
+]
+
+function formatMetricValue(value, unit) {
+  if (value == null || Number.isNaN(Number(value))) return '—'
+  const n = Number(value)
+  const text = Number.isInteger(n) ? String(n) : n.toFixed(1)
+  return unit ? `${text} ${unit}` : text
+}
+
+function renderMetricChart(cfg, points, latest) {
+  const w = 320
+  const h = 72
+  const pad = 4
+  const head = `<div class="metric-chart-head">
+    <span class="metric-chart-label">${esc(cfg.label)}</span>
+    <span class="metric-chart-latest">${esc(formatMetricValue(latest, cfg.unit))}</span>
+  </div>`
+  if (!points.length) {
+    return `<div class="metric-chart">${head}<p class="muted empty">No samples yet.</p></div>`
+  }
+  const vals = points.map((p) => Number(p.v))
+  let min = Math.min(...vals)
+  let max = Math.max(...vals)
+  if (min === max) {
+    min -= 1
+    max += 1
+  }
+  const step = points.length > 1 ? (w - pad * 2) / (points.length - 1) : 0
+  const path = points.map((p, i) => {
+    const x = pad + i * step
+    const y = pad + (h - pad * 2) * (1 - (Number(p.v) - min) / (max - min))
+    return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`
+  }).join(' ')
+  const area = `${path} L${(pad + (points.length - 1) * step).toFixed(1)},${h - pad} L${pad},${h - pad} Z`
+  return `<div class="metric-chart">${head}
+    <svg class="metric-chart-svg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">
+      <path class="metric-chart-area" d="${area}"></path>
+      <path class="metric-chart-line" d="${path}"></path>
+    </svg>
+  </div>`
+}
+
+function renderMetricsSection() {
+  const cur = metricsData?.current || {}
+  const err = metricsData?.error
+  const charts = METRIC_SERIES.map((cfg) => {
+    const points = metricsData?.series?.[cfg.key] || []
+    const latest = points.length ? points[points.length - 1].v : cur[cfg.key]
+    return renderMetricChart(cfg, points, latest)
+  }).join('')
+  const loading = !metricsData && !err
+  return `
+    <section class="panel overview-panel metrics-panel">
+      <div class="row head">
+        <h2>Performance over time</h2>
+        <label class="metrics-range">
+          <span class="muted">Timeframe</span>
+          <select id="metrics-range">
+            <option value="1h"${metricsRange === '1h' ? ' selected' : ''}>Last hour</option>
+            <option value="24h"${metricsRange === '24h' ? ' selected' : ''}>Last 24 hours</option>
+            <option value="7d"${metricsRange === '7d' ? ' selected' : ''}>Last 7 days</option>
+            <option value="30d"${metricsRange === '30d' ? ' selected' : ''}>Last 30 days</option>
+            <option value="90d"${metricsRange === '90d' ? ' selected' : ''}>Last 90 days</option>
+          </select>
+        </label>
+      </div>
+      <p class="hint">WebSocket clients, in-game sessions, and database pool health sampled about once per minute.</p>
+      ${err ? `<p class="bad">${esc(err)}</p>` : ''}
+      <div class="metrics-charts">${loading ? '<p class="muted">Loading metrics…</p>' : charts}</div>
+    </section>`
+}
+
+async function loadMetrics() {
+  try {
+    metricsData = await api(`/admin/api/metrics?range=${encodeURIComponent(metricsRange)}`)
+  } catch (e) {
+    metricsData = { error: String(e.message || e), series: {}, current: {} }
+  }
+  if (tab === 'overview') {
+    const main = $('#main')
+    if (main) {
+      main.innerHTML = renderOverview()
+      bindOverview(main)
+    }
+  }
+}
+
 function renderOverview() {
   const accounts = state.accounts || []
   const users = state.users || []
@@ -329,6 +426,7 @@ function renderOverview() {
         ${metric('Online in-game', sessions.length, 'sessions', 'presence heartbeats')}
       </div>
     </section>
+    ${renderMetricsSection()}
     <div class="overview-grid">
       <section class="panel">
         <div class="row head">
@@ -1499,9 +1597,17 @@ function render() {
     clearInterval(connDurationTimer)
     connDurationTimer = null
   }
+  if (metricsRefreshTimer) {
+    clearInterval(metricsRefreshTimer)
+    metricsRefreshTimer = null
+  }
   if (tab === 'overview') {
     main.innerHTML = renderOverview()
     bindOverview(main)
+    if (!metricsData) loadMetrics()
+    metricsRefreshTimer = setInterval(() => {
+      if (tab === 'overview') loadMetrics()
+    }, 60000)
     connDurationTimer = setInterval(() => {
       if (tab === 'overview') {
         main.innerHTML = renderOverview()
@@ -1542,6 +1648,15 @@ async function boot() {
   applyTheme(readStoredTheme())
   const themeBtn = $('#theme-toggle')
   if (themeBtn) themeBtn.addEventListener('click', toggleTheme)
+  const main = $('#main')
+  if (main) {
+    main.addEventListener('change', (e) => {
+      if (e.target.id === 'metrics-range') {
+        metricsRange = e.target.value
+        loadMetrics()
+      }
+    })
+  }
   me = await api('/admin/api/me')
   await refreshState()
   connectLive()
