@@ -3,6 +3,9 @@ package discord
 import (
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/bwmarrin/discordgo"
 )
 
 func TestCommandDefsKeepsSSOHelpersOnly(t *testing.T) {
@@ -64,5 +67,55 @@ func TestCmdAndSlash(t *testing.T) {
 	}
 	if got := b.slash("sso"); got != "/alfred-identity-sso" {
 		t.Fatalf("slash: %q", got)
+	}
+}
+
+func TestFmtTimeAndOptInt(t *testing.T) {
+	ts := time.Date(2024, 6, 1, 12, 30, 0, 0, time.UTC)
+	if got := fmtTime(ts); got != "2024-06-01 12:30 UTC" {
+		t.Fatalf("fmtTime: %q", got)
+	}
+	if got := fmtTime("plain"); got != "plain" {
+		t.Fatalf("fmtTime fallback: %q", got)
+	}
+
+	sub := &discordgo.ApplicationCommandInteractionDataOption{
+		Options: []*discordgo.ApplicationCommandInteractionDataOption{
+			{Name: "limit", Type: discordgo.ApplicationCommandOptionInteger, Value: float64(5)},
+		},
+	}
+	if got := optInt(sub, "limit"); got != 5 {
+		t.Fatalf("optInt: %d", got)
+	}
+	if got := optInt(sub, "missing"); got != 0 {
+		t.Fatalf("missing: %d", got)
+	}
+}
+
+func TestInteractionIdentity(t *testing.T) {
+	id, name, roles := interactionIdentity(&discordgo.InteractionCreate{
+		Interaction: &discordgo.Interaction{
+			Member: &discordgo.Member{
+				User:  &discordgo.User{ID: "1", Username: "alice"},
+				Roles: []string{"r1"},
+			},
+		},
+	})
+	if id != "1" || name != "alice" || len(roles) != 1 {
+		t.Fatalf("%s %s %#v", id, name, roles)
+	}
+	id, name, roles = interactionIdentity(&discordgo.InteractionCreate{
+		Interaction: &discordgo.Interaction{
+			User: &discordgo.User{ID: "2", Username: "bob"},
+		},
+	})
+	if id != "2" || name != "bob" || roles != nil {
+		t.Fatalf("%s %s %#v", id, name, roles)
+	}
+	id, name, roles = interactionIdentity(&discordgo.InteractionCreate{
+		Interaction: &discordgo.Interaction{},
+	})
+	if id != "" || name != "" || roles != nil {
+		t.Fatalf("empty: %s %s %#v", id, name, roles)
 	}
 }
