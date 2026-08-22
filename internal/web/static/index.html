@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Alfred Identity Admin</title>
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem('alfred-identity-theme');
+        if (t !== 'dark' && t !== 'light') t = 'light';
+        document.documentElement.setAttribute('data-theme', t);
+      } catch (e) {
+        document.documentElement.setAttribute('data-theme', 'light');
+      }
+    })();
+  </script>
+  <link rel="stylesheet" href="/admin/app.css"/>
+</head>
+<body>
+  <div id="app" class="shell">
+    <header class="top">
+      <div class="brand">Alfred Identity</div>
+      <nav class="tabs" id="tabs" role="tablist"></nav>
+      <div class="userbar">
+        <button type="button" class="secondary" id="theme-toggle" aria-label="Toggle theme">Dark</button>
+        <span id="whoami" class="muted"></span>
+        <a class="btn secondary" href="/admin/logout">Log out</a>
+      </div>
+    </header>
+    <div id="banner" class="banner err hidden"></div>
+    <main id="main"></main>
+    <footer class="statusbar">
+      <span id="live-status" class="muted">Connecting…</span>
+    </footer>
+  </div>
+  <div id="modal-root"></div>
+  <script src="/admin/app.js" type="module"></script>
+</body>
+</html>

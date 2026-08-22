@@ -1,0 +1,36 @@
+name: alfred-identity
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: alfred
+      POSTGRES_PASSWORD: alfred
+      POSTGRES_DB: alfred_identity
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U alfred -d alfred_identity"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  daemon:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://alfred:alfred@postgres:5432/alfred_identity?sslmode=disable
+      HTTP_ADDR: 0.0.0.0:8080
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    ports:
+      - "8181:8080"
+
+volumes:
+  pgdata:

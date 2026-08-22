@@ -1,0 +1,47 @@
+name: test
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+      - name: Unit tests + coverage
+        run: make coverage
+      - name: Upload coverage artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-reports
+          path: coverage/
+  store-integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: alfred
+          POSTGRES_PASSWORD: alfred
+          POSTGRES_DB: alfred_identity_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U alfred -d alfred_identity_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+      - name: Store integration tests
+        env:
+          TEST_DATABASE_URL: postgres://alfred:alfred@127.0.0.1:5432/alfred_identity_test?sslmode=disable
+        run: go test -count=1 -race ./internal/store/ -run 'TestShare|TestToken'
