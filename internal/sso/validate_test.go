@@ -34,14 +34,35 @@ func TestValidateFields(t *testing.T) {
 	if err := validateAlias(""); err == nil {
 		t.Fatal("alias required")
 	}
+	if err := validateAlias(strings.Repeat("a", 65)); err == nil {
+		t.Fatal("alias too long")
+	}
+	if err := validateAlias("bad\ralias"); err == nil {
+		t.Fatal("alias invalid")
+	}
+	if err := validateAlias("ok"); err != nil {
+		t.Fatal(err)
+	}
 	if err := validateTag(""); err == nil {
 		t.Fatal("tag required")
+	}
+	if err := validateTag(strings.Repeat("t", 65)); err == nil {
+		t.Fatal("tag too long")
+	}
+	if err := validateTag("bad\ntag"); err == nil {
+		t.Fatal("tag invalid")
 	}
 	if err := validateCharacter(""); err == nil {
 		t.Fatal("char required")
 	}
+	if err := validateCharacter(strings.Repeat("c", 65)); err == nil {
+		t.Fatal("char too long")
+	}
 	if err := validateCharacter("Hero"); err != nil {
 		t.Fatal(err)
+	}
+	if err := validatePassword("a\x00b"); err == nil {
+		t.Fatal("password nul")
 	}
 }
 

@@ -99,3 +99,25 @@ func TestMustRandTokenAndU64BE(t *testing.T) {
 		t.Fatalf("golden len %d", len(gb))
 	}
 }
+
+func TestDecryptDESBadLength(t *testing.T) {
+	if _, err := DecryptDES(nil); err == nil {
+		t.Fatal("nil")
+	}
+	if _, err := DecryptDES([]byte{}); err == nil {
+		t.Fatal("empty")
+	}
+	if _, err := DecryptDES([]byte{1, 2, 3}); err == nil {
+		t.Fatal("short")
+	}
+	// exact block size round-trip (no extra pad)
+	pt := []byte("12345678")
+	ct, err := EncryptDES(pt)
+	if err != nil || len(ct) != 8 {
+		t.Fatalf("%v len=%d", err, len(ct))
+	}
+	got, err := DecryptDES(ct)
+	if err != nil || string(got) != string(pt) {
+		t.Fatalf("%q err=%v", got, err)
+	}
+}
