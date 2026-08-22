@@ -48,10 +48,13 @@ func TestCommandDefsSSOSubcommands(t *testing.T) {
 		for _, o := range c.Options {
 			subs[o.Name] = true
 		}
-		for _, want := range []string{"create", "revoke", "list", "get"} {
+		for _, want := range []string{"get", "revoke", "list"} {
 			if !subs[want] {
 				t.Fatalf("sso missing subcommand %q", want)
 			}
+		}
+		if subs["create"] {
+			t.Fatal("create subcommand should be removed")
 		}
 	}
 	if !found {

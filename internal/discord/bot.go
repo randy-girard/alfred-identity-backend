@@ -10,6 +10,7 @@ import (
 
 	"github.com/alfred-identity/web/internal/config"
 	"github.com/alfred-identity/web/internal/store"
+	"github.com/alfred-identity/web/internal/web"
 	"github.com/bwmarrin/discordgo"
 )
 
@@ -273,13 +274,12 @@ func commandDefs(prefix string) []*discordgo.ApplicationCommand {
 			Name:        prefix + "sso",
 			Description: "SSO API tokens",
 			Options: []*discordgo.ApplicationCommandOption{
-				{Type: discordgo.ApplicationCommandOptionSubCommand, Name: "create", Description: "Create or replace your SSO token (one per Discord user)"},
+				{Type: discordgo.ApplicationCommandOptionSubCommand, Name: "get", Description: "Get or create your SSO token and Alfred Identity source JSON"},
 				{Type: discordgo.ApplicationCommandOptionSubCommand, Name: "revoke", Description: "Revoke your SSO token",
 					Options: []*discordgo.ApplicationCommandOption{
 						{Type: discordgo.ApplicationCommandOptionInteger, Name: "id", Description: "Token id (optional; defaults to your active token)", Required: false},
 					}},
 				{Type: discordgo.ApplicationCommandOptionSubCommand, Name: "list", Description: "Show your active token metadata"},
-				{Type: discordgo.ApplicationCommandOptionSubCommand, Name: "get", Description: "Show your SSO token secret"},
 			},
 		},
 		{
@@ -360,23 +360,6 @@ func interactionIdentity(i *discordgo.InteractionCreate) (id, name string, roles
 func (b *Bot) handleSSO(ctx context.Context, s *discordgo.Session, i *discordgo.InteractionCreate, u store.User, data discordgo.ApplicationCommandInteractionData) {
 	sub := data.Options[0]
 	switch sub.Name {
-	case "create":
-		raw, id, err := b.Store.CreateToken(ctx, u.ID)
-		if err != nil {
-			b.Log.Error("token create", "err", err, "user_id", u.ID)
-			b.respondErr(s, i, err.Error())
-			return
-		}
-		b.Store.Audit(ctx, u.ID, "token_create", fmt.Sprintf("token_id=%d", id))
-		b.Log.Info("token created", "token_id", id, "user_id", u.ID, "discord_id", u.DiscordID)
-		b.respondEmbed(s, i, &discordgo.MessageEmbed{
-			Title:       "SSO token ready",
-			Description: fmt.Sprintf("One token per Discord user. Any previous token was revoked.\nRetrieve anytime with `%s get`.", b.slash("sso")),
-			Color:       colorOK,
-			Fields: []*discordgo.MessageEmbedField{
-				{Name: "Secret", Value: fmt.Sprintf("```\n%s\n```", raw), Inline: false},
-			},
-		})
 	case "revoke":
 		id := optInt(sub, "id")
 		if err := b.Store.RevokeToken(ctx, u.ID, id); err != nil {
@@ -401,7 +384,7 @@ func (b *Bot) handleSSO(ctx context.Context, s *discordgo.Session, i *discordgo.
 		if !ok {
 			b.respondEmbed(s, i, &discordgo.MessageEmbed{
 				Title:       "SSO token",
-				Description: fmt.Sprintf("No active token for <@%s>.\n\nCreate one with `%s create`.", u.DiscordID, b.slash("sso")),
+				Description: fmt.Sprintf("No active token for <@%s>.\n\nRun `%s get` to create one.", u.DiscordID, b.slash("sso")),
 				Color:       colorInfo,
 			})
 			return
@@ -417,39 +400,53 @@ func (b *Bot) handleSSO(ctx context.Context, s *discordgo.Session, i *discordgo.
 				{Name: "Created", Value: fmtTime(t.CreatedAt), Inline: true},
 				{Name: "Last used", Value: last, Inline: true},
 			},
-			Footer: &discordgo.MessageEmbedFooter{Text: fmt.Sprintf("Use %s get for the secret · one token per Discord user", b.slash("sso"))},
+			Footer: &discordgo.MessageEmbedFooter{Text: fmt.Sprintf("Use %s get for the secret and GUI JSON · one token per Discord user", b.slash("sso"))},
 		})
 	case "get":
-		t, ok, err := b.Store.ActiveToken(ctx, u.ID)
+		secret, created, err := b.resolveSSOTokenSecret(ctx, u.ID)
 		if err != nil {
 			b.Log.Error("token get", "err", err, "user_id", u.ID)
 			b.respondErr(s, i, err.Error())
 			return
 		}
-		b.Log.Info("token get", "user_id", u.ID, "discord_id", u.DiscordID, "has_token", ok)
-		if !ok {
-			b.respondEmbed(s, i, &discordgo.MessageEmbed{
-				Title:       "SSO token",
-				Description: fmt.Sprintf("No active token for <@%s>.\n\nCreate one with `%s create`.", u.DiscordID, b.slash("sso")),
-				Color:       colorInfo,
-			})
-			return
-		}
-		var secretField string
-		if t.HasSecret {
-			secretField = fmt.Sprintf("```\n%s\n```", t.Raw)
+		if created {
+			b.Store.Audit(ctx, u.ID, "token_create", "via sso get")
+			b.Log.Info("token created via get", "user_id", u.ID, "discord_id", u.DiscordID)
 		} else {
-			secretField = fmt.Sprintf("_Secret unavailable (created before encrypted storage). Run `%s create` to replace it._", b.slash("sso"))
+			b.Log.Info("token get", "user_id", u.ID, "discord_id", u.DiscordID)
+		}
+		name := web.SourceNameFromConfig(b.Cfg)
+		host := web.SourceHostFromConfig(b.Cfg)
+		jsonSnippet := web.BuildSourceImportJSON(name, host, secret, "")
+		desc := "Keep this private. Paste the JSON into Alfred Identity → Connections → Add from JSON."
+		if created {
+			desc = "New SSO token created (one per Discord user). Paste the JSON into Alfred Identity → Connections → Add from JSON."
 		}
 		b.respondEmbed(s, i, &discordgo.MessageEmbed{
 			Title:       "Your SSO token",
-			Description: "Keep this private. Anyone with it can request login credentials for accounts you can access.",
+			Description: desc,
 			Color:       colorOK,
 			Fields: []*discordgo.MessageEmbedField{
-				{Name: "Secret", Value: secretField, Inline: false},
+				{Name: "Secret", Value: fmt.Sprintf("```\n%s\n```", secret), Inline: false},
+				{Name: "Alfred Identity source", Value: fmt.Sprintf("```json\n%s\n```", jsonSnippet), Inline: false},
 			},
 		})
 	}
+}
+
+func (b *Bot) resolveSSOTokenSecret(ctx context.Context, userID int64) (raw string, created bool, err error) {
+	t, ok, err := b.Store.ActiveToken(ctx, userID)
+	if err != nil {
+		return "", false, err
+	}
+	if ok && t.HasSecret {
+		return t.Raw, false, nil
+	}
+	raw, _, err = b.Store.CreateToken(ctx, userID)
+	if err != nil {
+		return "", false, err
+	}
+	return raw, true, nil
 }
 
 const (
