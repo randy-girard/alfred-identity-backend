@@ -55,3 +55,22 @@ func TestLimiterForDefault(t *testing.T) {
 		t.Fatal("expected distinct per user")
 	}
 }
+
+func TestUserIsAdminBootstrapAndRole(t *testing.T) {
+	h := &Hub{
+		BootstrapAdminIDs: []string{"boot"},
+		AdminRoleID:       "admin-role",
+	}
+	if !h.IsAdmin(store.User{DiscordID: "boot"}) {
+		t.Fatal("bootstrap admin")
+	}
+	if !h.IsAdmin(store.User{DiscordID: "other", RoleIDs: []string{"admin-role"}}) {
+		t.Fatal("expected role match")
+	}
+	if h.IsAdmin(store.User{DiscordID: "other", RoleIDs: []string{"viewer"}}) {
+		t.Fatal("non-admin role")
+	}
+	if h.IsAdmin(store.User{DiscordID: "other"}) {
+		t.Fatal("no roles")
+	}
+}
