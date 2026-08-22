@@ -43,3 +43,20 @@ func TestConfigBackupJSONRoundTrip(t *testing.T) {
 		t.Fatalf("accounts: %+v", got.Accounts)
 	}
 }
+
+func TestDecodeConfigBackup(t *testing.T) {
+	ok, err := decodeConfigBackup(strings.NewReader(`{"version":1,"users":[]}`))
+	if err != nil || ok.Version != 1 {
+		t.Fatalf("%+v err=%v", ok, err)
+	}
+	norm, err := decodeConfigBackup(strings.NewReader(`{"users":[]}`))
+	if err != nil || norm.Version != 1 {
+		t.Fatalf("normalize version: %+v err=%v", norm, err)
+	}
+	if _, err := decodeConfigBackup(strings.NewReader(`{"version":99}`)); err == nil {
+		t.Fatal("expected unsupported version")
+	}
+	if _, err := decodeConfigBackup(strings.NewReader(`{`)); err == nil {
+		t.Fatal("expected invalid json")
+	}
+}

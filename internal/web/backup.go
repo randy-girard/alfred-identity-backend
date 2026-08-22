@@ -208,17 +208,26 @@ func (s *Server) exportConfigBackup(ctx context.Context) (ConfigBackup, error) {
 	return out, nil
 }
 
-func (s *Server) importConfigBackup(ctx context.Context, r io.Reader) (ConfigImportResult, error) {
-	res := ConfigImportResult{Errors: []string{}}
+// decodeConfigBackup parses and version-gates a config backup JSON body.
+func decodeConfigBackup(r io.Reader) (ConfigBackup, error) {
 	var bak ConfigBackup
 	if err := json.NewDecoder(r).Decode(&bak); err != nil {
-		return res, fmt.Errorf("invalid backup JSON: %w", err)
+		return ConfigBackup{}, fmt.Errorf("invalid backup JSON: %w", err)
 	}
 	if bak.Version <= 0 {
 		bak.Version = 1
 	}
 	if bak.Version > configBackupVersion {
-		return res, fmt.Errorf("unsupported backup version %d (max %d)", bak.Version, configBackupVersion)
+		return ConfigBackup{}, fmt.Errorf("unsupported backup version %d (max %d)", bak.Version, configBackupVersion)
+	}
+	return bak, nil
+}
+
+func (s *Server) importConfigBackup(ctx context.Context, r io.Reader) (ConfigImportResult, error) {
+	res := ConfigImportResult{Errors: []string{}}
+	bak, err := decodeConfigBackup(r)
+	if err != nil {
+		return res, err
 	}
 
 	if len(bak.Roles) > 0 {
