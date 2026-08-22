@@ -96,6 +96,58 @@ func TestSessionCookieRoundTrip(t *testing.T) {
 	s.clearSessionCookie(rr)
 }
 
+func TestSessionCookieSecureFlag(t *testing.T) {
+	httpsSrv := New(Options{
+		SessionKey: []byte("test-session-key-32-bytes-long!!"),
+		PublicURL:  "https://identity.example.com",
+	})
+	rr := httptest.NewRecorder()
+	if err := httpsSrv.setSessionCookie(rr, Session{UserID: 1, ExpiresAt: time.Now().Add(time.Hour).Unix()}); err != nil {
+		t.Fatal(err)
+	}
+	c := rr.Result().Cookies()[0]
+	if !c.Secure || !c.HttpOnly || c.Name != sessionCookie {
+		t.Fatalf("%+v", c)
+	}
+
+	httpSrv := testServer(t)
+	rr = httptest.NewRecorder()
+	if err := httpSrv.setSessionCookie(rr, Session{UserID: 1, ExpiresAt: time.Now().Add(time.Hour).Unix()}); err != nil {
+		t.Fatal(err)
+	}
+	if rr.Result().Cookies()[0].Secure {
+		t.Fatal("http origin should not set Secure")
+	}
+}
+
+func TestHandleLogout(t *testing.T) {
+	s := testServer(t)
+	mux := http.NewServeMux()
+	s.Mount(mux)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, BasePath+"/logout", nil))
+	if rec.Code != http.StatusFound {
+		t.Fatalf("status %d", rec.Code)
+	}
+	if loc := rec.Header().Get("Location"); loc != BasePath+"/login" {
+		t.Fatalf("location %q", loc)
+	}
+	found := false
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == sessionCookie && (c.MaxAge < 0 || c.Value == "") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("expected cleared session cookie")
+	}
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPut, BasePath+"/logout", nil))
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("want 405 got %d", rec.Code)
+	}
+}
+
 func TestWebAccessLevel(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
