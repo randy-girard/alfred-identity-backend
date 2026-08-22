@@ -1630,10 +1630,12 @@ function renderGroups() {
     </section>`
 }
 
-function openEditGroupModal(group) {
-  const selectedUsers = new Set((group.user_ids || []).map(Number))
-  const selectedRoles = new Set(group.role_ids || [])
-  const selectedAccts = new Set((group.account_ids || []).map(Number))
+function openGroupModal(group) {
+  const isEdit = !!(group && group.id)
+  const g = group || {}
+  const selectedUsers = new Set((g.user_ids || []).map(Number))
+  const selectedRoles = new Set(g.role_ids || [])
+  const selectedAccts = new Set((g.account_ids || []).map(Number))
 
   const userItems = (state.users || []).map((u) => `
     <label class="role-item">
@@ -1657,23 +1659,23 @@ function openEditGroupModal(group) {
   root.innerHTML = `
     <div class="modal-backdrop" data-close="1">
       <div class="modal wide" role="dialog">
-        <h2>Edit group</h2>
+        <h2>${isEdit ? 'Edit group' : 'Create access group'}</h2>
         <div class="form-grid">
-          <div><label>Name</label><input id="m-name" value="${esc(group.name || '')}" autocomplete="off"/></div>
-          <div><label>Description</label><input id="m-desc" value="${esc(group.description || '')}" autocomplete="off"/></div>
+          <div><label>Name</label><input id="m-name" value="${esc(g.name || '')}" autocomplete="off" placeholder="e.g. Raid officers"/></div>
+          <div><label>Description</label><input id="m-desc" value="${esc(g.description || '')}" autocomplete="off"/></div>
           <div class="form-span">
             <label>Web UI access</label>
             <p class="hint">Optional. Members of this group may sign in to the web admin with the selected permission level.</p>
             <select id="m-web-role">
-              <option value="" ${!(group.web_role) ? 'selected' : ''}>Off — no web login from this group</option>
-              <option value="readonly" ${group.web_role === 'readonly' ? 'selected' : ''}>Read-only — view only</option>
-              <option value="admin" ${group.web_role === 'admin' ? 'selected' : ''}>Admin — full manage access</option>
+              <option value="" ${!(g.web_role) ? 'selected' : ''}>Off — no web login from this group</option>
+              <option value="readonly" ${g.web_role === 'readonly' ? 'selected' : ''}>Read-only — view only</option>
+              <option value="admin" ${g.web_role === 'admin' ? 'selected' : ''}>Admin — full manage access</option>
             </select>
           </div>
           <div class="form-span">
             <label>Discord slash commands</label>
             <p class="hint">Members may use the selected bot commands. When any group enables a command, users outside those groups are denied.</p>
-            <div class="role-list">${discordCommandsFieldHTML(group.discord_commands)}</div>
+            <div class="role-list">${discordCommandsFieldHTML(g.discord_commands || [])}</div>
           </div>
           <div class="form-span">
             <label>Discord users</label>
@@ -1692,9 +1694,9 @@ function openEditGroupModal(group) {
           </div>
         </div>
         <div class="modal-actions">
-          <button type="button" class="danger" data-del-group="1">Delete</button>
+          ${isEdit ? '<button type="button" class="danger" data-del-group="1">Delete</button>' : ''}
           <button type="button" class="secondary" data-cancel="1">Cancel</button>
-          <button type="button" data-save="1">Save</button>
+          <button type="button" data-save="1">${isEdit ? 'Save' : 'Create'}</button>
         </div>
       </div>
     </div>`
@@ -1702,66 +1704,42 @@ function openEditGroupModal(group) {
     if (e.target.dataset.close) closeModal()
   })
   root.querySelector('[data-cancel]').addEventListener('click', closeModal)
-  root.querySelector('[data-del-group]').addEventListener('click', () => run(async () => {
-    if (!confirm('Delete this group? Account links and memberships are removed.')) return
-    await api(`/admin/api/groups/${group.id}`, { method: 'DELETE' })
-    closeModal()
-  }))
+  if (isEdit) {
+    root.querySelector('[data-del-group]').addEventListener('click', () => run(async () => {
+      if (!confirm('Delete this group? Account links and memberships are removed.')) return
+      await api(`/admin/api/groups/${group.id}`, { method: 'DELETE' })
+      closeModal()
+    }))
+  }
   root.querySelector('[data-save]').addEventListener('click', () => run(async () => {
     const name = root.querySelector('#m-name').value.trim()
     if (!name) throw new Error('name required')
-    const user_ids = [...root.querySelectorAll('input[name=m-g-user]:checked')].map((i) => Number(i.value))
-    const role_ids = [...root.querySelectorAll('input[name=m-g-role]:checked')].map((i) => i.value)
-    const account_ids = [...root.querySelectorAll('input[name=m-g-acct]:checked')].map((i) => Number(i.value))
-    await api(`/admin/api/groups/${group.id}`, {
-      method: 'PATCH',
-      body: JSON.stringify({
-        name,
-        description: root.querySelector('#m-desc').value.trim(),
-        web_role: root.querySelector('#m-web-role').value,
-        discord_commands: readDiscordCommandsFromModal(root),
-        user_ids,
-        role_ids,
-        account_ids,
-      }),
-    })
+    const payload = {
+      name,
+      description: root.querySelector('#m-desc').value.trim(),
+      web_role: root.querySelector('#m-web-role').value,
+      discord_commands: readDiscordCommandsFromModal(root),
+      user_ids: [...root.querySelectorAll('input[name=m-g-user]:checked')].map((i) => Number(i.value)),
+      role_ids: [...root.querySelectorAll('input[name=m-g-role]:checked')].map((i) => i.value),
+      account_ids: [...root.querySelectorAll('input[name=m-g-acct]:checked')].map((i) => Number(i.value)),
+    }
+    if (isEdit) {
+      await api(`/admin/api/groups/${group.id}`, { method: 'PATCH', body: JSON.stringify(payload) })
+    } else {
+      await api('/admin/api/groups', { method: 'POST', body: JSON.stringify(payload) })
+    }
     closeModal()
   }))
+}
+
+function openEditGroupModal(group) {
+  openGroupModal(group)
 }
 
 function bindGroups(root) {
   root.querySelector('#add-group')?.addEventListener('click', () => {
     if (!isWebAdmin()) return
-    modal('Create access group', `
-      <div><label>Name</label><input id="m-name" autocomplete="off" placeholder="e.g. Raid officers"/></div>
-      <div><label>Description</label><input id="m-desc" autocomplete="off"/></div>
-      <div>
-        <label>Web UI access</label>
-        <select id="m-web-role">
-          <option value="" selected>Off — no web login from this group</option>
-          <option value="readonly">Read-only</option>
-          <option value="admin">Admin</option>
-        </select>
-      </div>
-      <div>
-        <label>Discord slash commands</label>
-        <p class="hint">When any group enables a command, only members of groups with that command may use it.</p>
-        <div class="role-list">${discordCommandsFieldHTML([])}</div>
-      </div>
-    `, (el) => run(async () => {
-      const name = el.querySelector('#m-name').value.trim()
-      if (!name) throw new Error('name required')
-      await api('/admin/api/groups', {
-        method: 'POST',
-        body: JSON.stringify({
-          name,
-          description: el.querySelector('#m-desc').value.trim(),
-          web_role: el.querySelector('#m-web-role').value,
-          discord_commands: readDiscordCommandsFromModal(el),
-        }),
-      })
-      closeModal()
-    }))
+    openGroupModal(null)
   })
   root.querySelectorAll('[data-edit-group]').forEach((btn) => {
     btn.onclick = () => {

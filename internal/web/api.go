@@ -530,6 +530,9 @@ func (s *Server) handleGroups(w http.ResponseWriter, r *http.Request) {
 		Description     string   `json:"description"`
 		WebRole         string   `json:"web_role"`
 		DiscordCommands []string `json:"discord_commands"`
+		UserIDs         []int64  `json:"user_ids"`
+		RoleIDs         []string `json:"role_ids"`
+		AccountIDs      []int64  `json:"account_ids"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad_request")
@@ -539,6 +542,27 @@ func (s *Server) handleGroups(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	if body.UserIDs != nil || body.RoleIDs != nil {
+		userIDs, roleIDs := body.UserIDs, body.RoleIDs
+		if userIDs == nil {
+			userIDs = []int64{}
+		}
+		if roleIDs == nil {
+			roleIDs = []string{}
+		}
+		if err := s.store.ReplaceGroupMembership(ctx, id, userIDs, roleIDs); err != nil {
+			s.log.Error("web create group membership", "err", err, "group_id", id)
+			writeErr(w, http.StatusInternalServerError, "internal")
+			return
+		}
+	}
+	if body.AccountIDs != nil {
+		if err := s.store.ReplaceGroupAccountLinks(ctx, id, body.AccountIDs); err != nil {
+			s.log.Error("web create group accounts", "err", err, "group_id", id)
+			writeErr(w, http.StatusInternalServerError, "internal")
+			return
+		}
 	}
 	s.store.Audit(ctx, u.ID, "web_create_group", "id="+strconv.FormatInt(id, 10))
 	s.hub.BroadcastFullState()
