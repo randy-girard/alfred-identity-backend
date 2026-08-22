@@ -102,3 +102,11 @@ func TestParseSSOAccountsCSVEmpty(t *testing.T) {
 		t.Fatal("expected no rows")
 	}
 }
+
+func TestParseSSOAccountsCSVSkipsBlanks(t *testing.T) {
+	in := "name,password\n,secret\nacct,pw\n"
+	rows, err := parseSSOAccountsCSV(strings.NewReader(in))
+	if err != nil || len(rows) != 1 || rows[0].Username != "acct" {
+		t.Fatalf("%+v err=%v", rows, err)
+	}
+}

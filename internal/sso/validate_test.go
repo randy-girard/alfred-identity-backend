@@ -61,6 +61,12 @@ func TestValidateFields(t *testing.T) {
 	if err := validateCharacter("Hero"); err != nil {
 		t.Fatal(err)
 	}
+	if err := validateCharacter("bad\nchar"); err == nil {
+		t.Fatal("char invalid newline")
+	}
+	if err := validateTag("bad\x00tag"); err == nil {
+		t.Fatal("tag nul")
+	}
 	if err := validatePassword("a\x00b"); err == nil {
 		t.Fatal("password nul")
 	}
