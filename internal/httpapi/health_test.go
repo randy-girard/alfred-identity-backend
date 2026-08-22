@@ -45,3 +45,20 @@ func TestRequestLogPassesThrough(t *testing.T) {
 		t.Fatalf("status=%d", rr.Code)
 	}
 }
+
+func TestStatusWriterFlushAndHijack(t *testing.T) {
+	rr := httptest.NewRecorder()
+	sw := &statusWriter{ResponseWriter: rr, code: 200}
+	sw.Flush() // ResponseRecorder is a Flusher
+
+	sw2 := &statusWriter{ResponseWriter: &plainWriter{}, code: 200}
+	if _, _, err := sw2.Hijack(); err != http.ErrNotSupported {
+		t.Fatalf("hijack: %v", err)
+	}
+}
+
+type plainWriter struct{}
+
+func (plainWriter) Header() http.Header         { return http.Header{} }
+func (plainWriter) Write(b []byte) (int, error) { return len(b), nil }
+func (plainWriter) WriteHeader(int)             {}
