@@ -76,7 +76,7 @@ func (s *Server) currentMetrics(ctx context.Context) map[string]any {
 		defer cancel()
 		start := time.Now()
 		if err := s.store.DB.PingContext(pingCtx); err == nil {
-			out[store.MetricDBLatencyMS] = float64(time.Since(start).Milliseconds())
+			out[store.MetricDBLatencyMS] = float64(time.Since(start).Microseconds()) / 1000.0
 		}
 		st := s.store.DB.Stats()
 		out[store.MetricDBOpenConns] = st.OpenConnections

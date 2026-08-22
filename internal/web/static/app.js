@@ -36,6 +36,10 @@ function applyTheme(theme) {
 
 function toggleTheme() {
   applyTheme(readStoredTheme() === 'dark' ? 'light' : 'dark')
+  if (tab === 'overview') {
+    const main = $('#main')
+    if (main) mountMetricCharts(main)
+  }
 }
 
 let state = { accounts: [], users: [], roles: [], groups: [], sessions: [], connections: [], online: [] }
@@ -48,6 +52,7 @@ let metricsRefreshTimer = null
 let liveConnected = false
 let metricsRange = '24h'
 let metricsData = null
+let metricChartInstances = []
 let auditEntries = []
 let auditOffset = 0
 let auditLoading = false
@@ -82,6 +87,29 @@ function webRoleLabel(role) {
   if (role === 'admin') return 'Admin'
   if (role === 'readonly') return 'Read-only'
   return 'Off'
+}
+
+const DISCORD_COMMANDS = [
+  { id: 'sso', label: 'SSO token commands (/sso)' },
+  { id: 'whoami', label: 'Identity lookup (/whoami)' },
+]
+
+function discordCommandsLabel(cmds) {
+  if (!cmds || !cmds.length) return '—'
+  return cmds.map((c) => `/${c}`).join(', ')
+}
+
+function discordCommandsFieldHTML(selected = []) {
+  const set = new Set((selected || []).map(String))
+  return DISCORD_COMMANDS.map((c) => `
+    <label class="role-item">
+      <input type="checkbox" name="m-g-cmd" value="${c.id}" ${set.has(c.id) ? 'checked' : ''}/>
+      <span>${esc(c.label)}</span>
+    </label>`).join('')
+}
+
+function readDiscordCommandsFromModal(root) {
+  return [...root.querySelectorAll('input[name=m-g-cmd]:checked')].map((i) => i.value)
 }
 
 function roleName(id) {
@@ -148,12 +176,12 @@ async function run(fn) {
   }
 }
 
-async function refreshState() {
+async function refreshState(skipRender) {
   const data = await api('/admin/api/state')
-  applyState(data)
+  applyState(data, skipRender)
 }
 
-function applyState(data) {
+function applyState(data, skipRender) {
   state = {
     accounts: data.accounts || [],
     users: data.users || [],
@@ -163,7 +191,20 @@ function applyState(data) {
     connections: data.connections || [],
     online: data.online || [],
   }
-  render()
+  if (skipRender) return
+  if (tab === 'overview') {
+    refreshOverviewLive()
+    return
+  }
+  if (tab === 'connections') {
+    const main = $('#main')
+    if (main) main.innerHTML = renderConnections()
+    return
+  }
+  if (tab === 'sessions') {
+    const main = $('#main')
+    if (main) main.innerHTML = renderSessions()
+  }
 }
 
 function connectLive() {
@@ -174,13 +215,13 @@ function connectLive() {
     liveConnected = true
     status.textContent = 'Live · connected'
     status.className = 'ok'
-    if (tab === 'overview') render()
+    if (tab === 'overview') refreshOverviewLive()
   }
   ws.onclose = () => {
     liveConnected = false
     status.textContent = 'Live · disconnected (retrying…)'
     status.className = 'bad'
-    if (tab === 'overview') render()
+    if (tab === 'overview') refreshOverviewLive()
     setTimeout(connectLive, 2500)
   }
   ws.onerror = () => {}
@@ -273,64 +314,534 @@ function metric(label, value, tabId, hint) {
   </button>`
 }
 
-const METRIC_SERIES = [
-  { key: 'gui_connections', label: 'GUI WebSocket clients', unit: '' },
-  { key: 'game_sessions', label: 'In-game sessions', unit: '' },
-  { key: 'db_latency_ms', label: 'DB ping latency', unit: 'ms' },
-  { key: 'db_open_connections', label: 'DB pool (open)', unit: '' },
-  { key: 'db_in_use_connections', label: 'DB pool (in use)', unit: '' },
-  { key: 'db_idle_connections', label: 'DB pool (idle)', unit: '' },
+const METRIC_CHARTS = [
+  {
+    id: 'activity',
+    title: 'Connections & sessions',
+    hint: 'Desktop GUI WebSocket clients and in-game presence over the selected window.',
+    series: [
+      { key: 'gui_connections', label: 'GUI clients', color: 'accent' },
+      { key: 'game_sessions', label: 'In-game sessions', color: 'ok' },
+    ],
+  },
+  {
+    id: 'db-latency',
+    title: 'Database latency',
+    hint: 'Round-trip time for a database ping on each sample.',
+    series: [
+      { key: 'db_latency_ms', label: 'Ping latency', unit: 'ms', color: 'warn' },
+    ],
+  },
+  {
+    id: 'db-pool',
+    title: 'Database pool',
+    hint: 'Open, in-use, and idle connections in the Go sql.DB pool.',
+    series: [
+      { key: 'db_in_use_connections', label: 'In use', color: 'accent' },
+      { key: 'db_idle_connections', label: 'Idle', color: 'ok' },
+      { key: 'db_open_connections', label: 'Open', color: 'muted' },
+    ],
+  },
 ]
 
-function formatMetricValue(value, unit) {
+const LIVE_METRIC_KEYS = {
+  gui_connections: () => (state.connections || []).length,
+  game_sessions: () => (state.sessions || []).length,
+}
+
+const DB_METRIC_KEYS = [
+  'db_latency_ms',
+  'db_open_connections',
+  'db_in_use_connections',
+  'db_idle_connections',
+]
+
+const METRIC_COLOR_FALLBACKS = {
+  accent: '#0a84ff',
+  ok: '#1a7f37',
+  muted: '#666666',
+  warn: '#c98200',
+}
+
+function chartLib() {
+  return typeof Chart !== 'undefined' ? Chart : null
+}
+
+function readMetricsTheme() {
+  const s = getComputedStyle(document.documentElement)
+  return {
+    accent: s.getPropertyValue('--accent').trim() || METRIC_COLOR_FALLBACKS.accent,
+    ok: s.getPropertyValue('--ok').trim() || METRIC_COLOR_FALLBACKS.ok,
+    muted: s.getPropertyValue('--muted').trim() || METRIC_COLOR_FALLBACKS.muted,
+    warn: METRIC_COLOR_FALLBACKS.warn,
+    fg: s.getPropertyValue('--fg').trim() || '#1c1c1c',
+    panel: s.getPropertyValue('--panel').trim() || '#ffffff',
+    line: s.getPropertyValue('--line').trim() || '#d0d0d0',
+  }
+}
+
+function metricColor(name, theme) {
+  return theme[name] || METRIC_COLOR_FALLBACKS[name] || theme.accent
+}
+
+function colorAlpha(color, alpha) {
+  const c = String(color || '').trim()
+  if (c.startsWith('#')) {
+    const hex = c.slice(1)
+    const full = hex.length === 3
+      ? hex.split('').map((ch) => ch + ch).join('')
+      : hex.padEnd(6, '0').slice(0, 6)
+    const n = Number.parseInt(full, 16)
+    if (!Number.isNaN(n)) {
+      return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`
+    }
+  }
+  return c
+}
+
+function parseMetricTime(iso) {
+  if (!iso) return null
+  const ms = Date.parse(iso)
+  return Number.isNaN(ms) ? null : ms
+}
+
+function isCountMetric(key) {
+  return key !== 'db_latency_ms'
+}
+
+function formatMetricValue(value, unit, key) {
   if (value == null || Number.isNaN(Number(value))) return '—'
   const n = Number(value)
+  if (unit === 'ms' || key === 'db_latency_ms') {
+    const text = n < 10 ? n.toFixed(1) : (Number.isInteger(n) ? String(n) : n.toFixed(1))
+    return `${text} ms`
+  }
+  if (key && isCountMetric(key)) {
+    return String(Math.round(n))
+  }
   const text = Number.isInteger(n) ? String(n) : n.toFixed(1)
   return unit ? `${text} ${unit}` : text
 }
 
-function renderMetricChart(cfg, points, latest) {
-  const w = 320
-  const h = 72
-  const pad = 4
-  const head = `<div class="metric-chart-head">
-    <span class="metric-chart-label">${esc(cfg.label)}</span>
-    <span class="metric-chart-latest">${esc(formatMetricValue(latest, cfg.unit))}</span>
-  </div>`
-  if (!points.length) {
-    return `<div class="metric-chart">${head}<p class="muted empty">No samples yet.</p></div>`
+function metricSeriesStats(points) {
+  if (!points.length) return null
+  const vals = points.map((p) => p.v)
+  const sum = vals.reduce((a, b) => a + b, 0)
+  return {
+    min: Math.min(...vals),
+    max: Math.max(...vals),
+    avg: sum / vals.length,
+    latest: vals[vals.length - 1],
   }
-  const vals = points.map((p) => Number(p.v))
-  let min = Math.min(...vals)
-  let max = Math.max(...vals)
-  if (min === max) {
-    min -= 1
-    max += 1
+}
+
+function metricSeriesStatsInt(points) {
+  const st = metricSeriesStats(points)
+  if (!st) return null
+  return {
+    min: Math.round(st.min),
+    max: Math.round(st.max),
+    avg: Math.round(st.avg),
+    latest: Math.round(st.latest),
   }
-  const step = points.length > 1 ? (w - pad * 2) / (points.length - 1) : 0
-  const path = points.map((p, i) => {
-    const x = pad + i * step
-    const y = pad + (h - pad * 2) * (1 - (Number(p.v) - min) / (max - min))
-    return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`
-  }).join(' ')
-  const area = `${path} L${(pad + (points.length - 1) * step).toFixed(1)},${h - pad} L${pad},${h - pad} Z`
-  return `<div class="metric-chart">${head}
-    <svg class="metric-chart-svg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">
-      <path class="metric-chart-area" d="${area}"></path>
-      <path class="metric-chart-line" d="${path}"></path>
-    </svg>
-  </div>`
+}
+
+function metricsTimeScaleOptions() {
+  switch (metricsRange) {
+    case '1h':
+      return { unit: 'minute', displayFormats: { minute: 'HH:mm' } }
+    case '24h':
+      return { unit: 'hour', displayFormats: { hour: 'HH:mm', minute: 'HH:mm' } }
+    case '7d':
+      return { unit: 'day', displayFormats: { day: 'MMM d', hour: 'MMM d HH:mm' } }
+    case '30d':
+    case '90d':
+      return { unit: 'day', displayFormats: { day: 'MMM d' } }
+    default:
+      return { unit: 'hour', displayFormats: { hour: 'HH:mm' } }
+  }
+}
+
+function buildMetricDatasets(chartDef, theme) {
+  return chartDef.series.map((cfg) => {
+    let points = (metricsData?.series?.[cfg.key] || [])
+      .map((p) => {
+        let y = Number(p.v)
+        if (isCountMetric(cfg.key)) y = Math.round(y)
+        return { x: parseMetricTime(p.t), y }
+      })
+      .filter((p) => p.x != null && !Number.isNaN(p.y))
+      .sort((a, b) => a.x - b.x)
+    if (!points.length && metricsData?.current?.[cfg.key] != null) {
+      let value = Number(metricsData.current[cfg.key])
+      if (isCountMetric(cfg.key)) value = Math.round(value)
+      if (!Number.isNaN(value)) points = [{ x: Date.now(), y: value }]
+    }
+    const stroke = metricColor(cfg.color, theme)
+    return {
+      label: cfg.label,
+      data: points,
+      borderColor: stroke,
+      backgroundColor: colorAlpha(stroke, chartDef.series.length === 1 ? 0.18 : 0.08),
+      tension: 0.3,
+      pointRadius: 0,
+      pointHoverRadius: 4,
+      pointHitRadius: 12,
+      borderWidth: 2,
+      fill: chartDef.series.length === 1,
+    }
+  })
+}
+
+function metricsChartOptions(chartDef, theme) {
+  const unit = chartDef.series.find((s) => s.unit)?.unit || ''
+  const isLatency = chartDef.id === 'db-latency'
+  const isCountChart = !isLatency
+  const timeOpts = metricsTimeScaleOptions()
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: { duration: 350 },
+    interaction: { mode: 'index', intersect: false },
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        backgroundColor: theme.panel,
+        titleColor: theme.fg,
+        bodyColor: theme.fg,
+        borderColor: theme.line,
+        borderWidth: 1,
+        padding: 10,
+        callbacks: {
+          label(ctx) {
+            const seriesCfg = chartDef.series[ctx.datasetIndex]
+            return `${ctx.dataset.label}: ${formatMetricValue(ctx.parsed.y, seriesCfg?.unit || unit, seriesCfg?.key)}`
+          },
+        },
+      },
+    },
+    scales: {
+      x: {
+        type: 'time',
+        bounds: 'data',
+        time: {
+          tooltipFormat: 'PPpp',
+          ...timeOpts,
+        },
+        grid: { color: colorAlpha(theme.line, 0.45) },
+        border: { color: colorAlpha(theme.line, 0.8) },
+        ticks: {
+          color: theme.muted,
+          maxRotation: 0,
+          autoSkip: true,
+          maxTicksLimit: 4,
+        },
+      },
+      y: {
+        beginAtZero: true,
+        grace: isLatency ? '25%' : '8%',
+        grid: { color: colorAlpha(theme.line, 0.45) },
+        border: { color: colorAlpha(theme.line, 0.8) },
+        ticks: {
+          color: theme.muted,
+          maxTicksLimit: 4,
+          precision: isCountChart ? 0 : undefined,
+          stepSize: isCountChart ? 1 : undefined,
+          callback: (v) => formatMetricValue(v, unit, isCountChart ? 'count' : 'db_latency_ms'),
+        },
+        afterDataLimits(axis) {
+          if (isLatency && axis.max <= 0) axis.max = 1
+        },
+      },
+    },
+  }
+}
+
+function destroyMetricCharts() {
+  metricChartInstances.forEach((chart) => {
+    try { chart.destroy() } catch { /* ignore */ }
+  })
+  metricChartInstances = []
+  const ChartCtor = chartLib()
+  if (!ChartCtor) return
+  METRIC_CHARTS.forEach((def) => {
+    const el = document.getElementById(`metrics-chart-${def.id}`)
+    if (!el) return
+    const existing = ChartCtor.getChart(el)
+    if (existing) existing.destroy()
+  })
+}
+
+function mountMetricCharts(root) {
+  const ChartCtor = chartLib()
+  if (!ChartCtor || !root || !metricsData || metricsData.error) {
+    destroyMetricCharts()
+    return
+  }
+  destroyMetricCharts()
+  const theme = readMetricsTheme()
+  METRIC_CHARTS.forEach((chartDef) => {
+    const canvas = root.querySelector(`#metrics-chart-${chartDef.id}`)
+    if (!canvas) return
+    const datasets = buildMetricDatasets(chartDef, theme)
+    if (!datasets.some((d) => d.data.length)) return
+    const chart = new ChartCtor(canvas, {
+      type: 'line',
+      data: { datasets },
+      options: metricsChartOptions(chartDef, theme),
+    })
+    metricChartInstances.push(chart)
+  })
+}
+
+function syncMetricsCurrentFromState() {
+  if (!metricsData || metricsData.error) return
+  metricsData.current = {
+    ...(metricsData.current || {}),
+    gui_connections: LIVE_METRIC_KEYS.gui_connections(),
+    game_sessions: LIVE_METRIC_KEYS.game_sessions(),
+  }
+}
+
+function patchLiveMetricSeries() {
+  if (!metricsData || metricsData.error) return
+  if (!metricsData.series) metricsData.series = {}
+  const now = Date.now()
+  Object.entries(LIVE_METRIC_KEYS).forEach(([key, getter]) => {
+    upsertMetricSample(key, getter(), now)
+  })
+}
+
+function patchDbMetricsFromCurrent() {
+  if (!metricsData || metricsData.error || !metricsData.current) return
+  if (!metricsData.series) metricsData.series = {}
+  const now = Date.now()
+  DB_METRIC_KEYS.forEach((key) => {
+    const value = metricsData.current[key]
+    if (value == null || Number.isNaN(Number(value))) return
+    upsertMetricSample(key, Number(value), now)
+  })
+}
+
+function upsertMetricSample(key, value, nowMs) {
+  if (isCountMetric(key)) value = Math.round(value)
+  const series = metricsData.series[key] || (metricsData.series[key] = [])
+  const last = series[series.length - 1]
+  const lastTs = last ? parseMetricTime(last.t) : null
+  if (last && lastTs != null && nowMs - lastTs < 120000) {
+    last.v = value
+    last.t = new Date(nowMs).toISOString()
+  } else {
+    series.push({ t: new Date(nowMs).toISOString(), v: value })
+  }
+}
+
+function renderChartLegendHTML(chartDef) {
+  const cur = metricsData?.current || {}
+  const theme = readMetricsTheme()
+  return chartDef.series.map((cfg) => {
+    const points = metricsData?.series?.[cfg.key] || []
+    const latest = points.length ? points[points.length - 1].v : cur[cfg.key]
+    return `<span class="chart-legend-item">
+      <span class="chart-legend-swatch" style="background:${esc(metricColor(cfg.color, theme))}"></span>
+      <span>${esc(cfg.label)}</span>
+      <strong>${esc(formatMetricValue(latest, cfg.unit || '', cfg.key))}</strong>
+    </span>`
+  }).join('')
+}
+
+function updateMetricChartsData(animate) {
+  const ChartCtor = chartLib()
+  if (!ChartCtor || !metricsData || metricsData.error) return
+  const theme = readMetricsTheme()
+  const mode = animate ? 'default' : 'none'
+  METRIC_CHARTS.forEach((chartDef) => {
+    const canvas = document.getElementById(`metrics-chart-${chartDef.id}`)
+    if (!canvas) return
+    let chart = ChartCtor.getChart(canvas)
+    const datasets = buildMetricDatasets(chartDef, theme)
+    if (!datasets.some((d) => d.data.length)) return
+    if (!chart) {
+      chart = new ChartCtor(canvas, {
+        type: 'line',
+        data: { datasets },
+        options: metricsChartOptions(chartDef, theme),
+      })
+      metricChartInstances.push(chart)
+      return
+    }
+    chart.data.datasets = datasets
+    chart.options = metricsChartOptions(chartDef, theme)
+    chart.update(mode)
+    const article = document.querySelector(`.time-chart[data-chart="${chartDef.id}"]`)
+    const legend = article?.querySelector('.chart-legend')
+    if (legend) legend.innerHTML = renderChartLegendHTML(chartDef)
+  })
+}
+
+function overviewStats() {
+  const accounts = state.accounts || []
+  const users = state.users || []
+  const sessions = state.sessions || []
+  const connections = state.connections || []
+  const disabled = accounts.filter((a) => a.disabled).length
+  const restricted = accounts.filter((a) => a.restricted && !a.disabled).length
+  const elevated = accounts.filter((a) => !a.disabled && !a.restricted && (
+    (a.required_role_ids && a.required_role_ids.length) || a.required_role_id
+    || (a.required_user_ids && a.required_user_ids.length) || a.required_user_id
+    || (a.group_ids && a.group_ids.length)
+  )).length
+  const base = accounts.filter((a) => !a.disabled && !a.restricted
+    && !(a.required_role_ids && a.required_role_ids.length) && !a.required_role_id
+    && !(a.required_user_ids && a.required_user_ids.length) && !a.required_user_id
+    && !(a.group_ids && a.group_ids.length)).length
+  const revoked = users.filter((u) => u.access_revoked).length
+  const withToken = users.filter((u) => u.has_active_token && !u.access_revoked).length
+  const adminsOnline = connections.filter((c) => c.is_admin).length
+  return {
+    accounts, users, sessions, connections, disabled, restricted, elevated, base,
+    revoked, withToken, adminsOnline,
+  }
+}
+
+function renderOverviewMetricCards() {
+  const s = overviewStats()
+  return `
+    ${metric('EQ accounts', s.accounts.length, 'accounts', `${s.base} all · ${s.elevated} limited · ${s.restricted} shared · ${s.disabled} disabled`)}
+    ${metric('SSO users', s.users.length, 'users', `${s.withToken} with token · ${s.revoked} revoked`)}
+    ${metric('Groups', (state.groups || []).length, 'groups')}
+    ${metric('Private shares', s.restricted, 'shares')}
+    ${metric('GUI connected', s.connections.length, 'connections', s.adminsOnline ? `${s.adminsOnline} admin` : 'desktop clients')}
+    ${metric('Online in-game', s.sessions.length, 'sessions', 'presence heartbeats')}`
+}
+
+function renderOverviewOnlineRows() {
+  const { accounts, users, sessions } = overviewStats()
+  return sessions.slice(0, 8).map((sess) => {
+    const acct = accounts.find((a) => a.id === sess.account_id)
+    const u = users.find((x) => x.id === sess.user_id)
+    return `<tr>
+      <td class="mono">${esc(acct?.username || `#${sess.account_id}`)}</td>
+      <td>${esc(sess.character_name || '—')}</td>
+      <td>${esc(u?.display_name || u?.discord_id || (sess.user_id ? `#${sess.user_id}` : '—'))}</td>
+    </tr>`
+  }).join('')
+}
+
+function renderOverviewConnectionRows() {
+  const { connections } = overviewStats()
+  return [...connections]
+    .sort((a, b) => String(a.connected_at || '').localeCompare(String(b.connected_at || '')))
+    .slice(0, 8)
+    .map((c) => `<tr>
+      <td>${esc(c.display_name || c.discord_id || `#${c.user_id}`)}${c.is_admin ? ' <span class="muted">admin</span>' : ''}</td>
+      <td class="mono">${esc(c.client_version || '—')}</td>
+      <td class="conn-duration" data-connected-at="${esc(c.connected_at || '')}">${esc(formatDuration(c.connected_at))}</td>
+    </tr>`).join('')
+}
+
+function patchOverviewPanels(main) {
+  if (!main) return
+  const liveLabel = liveConnected ? 'Live updates connected' : 'Live updates disconnected'
+  const badge = main.querySelector('#overview-live-badge')
+  if (badge) {
+    badge.textContent = liveLabel
+    badge.className = liveConnected ? 'ok' : 'bad'
+  }
+  const metricsEl = main.querySelector('#overview-metric-cards')
+  if (metricsEl) metricsEl.innerHTML = renderOverviewMetricCards()
+  const onlineBody = main.querySelector('#overview-online-body')
+  if (onlineBody) {
+    onlineBody.innerHTML = renderOverviewOnlineRows()
+      || '<tr><td colspan="3" class="empty">Nobody online.</td></tr>'
+  }
+  const connBody = main.querySelector('#overview-connections-body')
+  if (connBody) {
+    connBody.innerHTML = renderOverviewConnectionRows()
+      || '<tr><td colspan="3" class="empty">No GUI clients connected.</td></tr>'
+  }
+}
+
+function refreshOverviewLive() {
+  const main = $('#main')
+  if (!main || tab !== 'overview') return
+  bootstrapMetricsData()
+  if (metricsData && !metricsData.error) {
+    patchLiveMetricSeries()
+    patchDbMetricsFromCurrent()
+  }
+  if (main.querySelector('#overview-metric-cards')) {
+    patchOverviewPanels(main)
+    if (metricsData && !metricsData.error) updateMetricChartsData(false)
+    return
+  }
+  main.innerHTML = renderOverview()
+  bindOverview(main)
+}
+
+function renderTimeSeriesChart(chartDef) {
+  const series = chartDef.series.map((cfg) => {
+    const points = (metricsData?.series?.[cfg.key] || [])
+      .map((p) => ({ t: parseMetricTime(p.t), v: Number(p.v) }))
+      .filter((p) => p.t != null && !Number.isNaN(p.v))
+    return { ...cfg, points }
+  })
+  const allPoints = series.flatMap((s) => s.points)
+  const legend = renderChartLegendHTML(chartDef)
+
+  const summaryParts = series.map((s) => {
+    const st = isCountMetric(s.key) ? metricSeriesStatsInt(s.points) : metricSeriesStats(s.points)
+    if (!st) {
+      const curVal = metricsData?.current?.[s.key]
+      if (curVal == null || Number.isNaN(Number(curVal))) return ''
+      return `${s.label}: now ${formatMetricValue(curVal, s.unit || '', s.key)}`
+    }
+    return `${s.label}: peak ${formatMetricValue(st.max, s.unit || '', s.key)}, avg ${formatMetricValue(st.avg, s.unit || '', s.key)}`
+  }).filter(Boolean)
+  const summary = summaryParts.length
+    ? `<div class="chart-summary muted">${esc(summaryParts.join(' · '))}</div>`
+    : ''
+
+  const hasData = allPoints.length || chartDef.series.some((cfg) => {
+    const curVal = metricsData?.current?.[cfg.key]
+    return curVal != null && !Number.isNaN(Number(curVal))
+  })
+  const body = hasData
+    ? `<div class="time-chart-wrap"><canvas id="metrics-chart-${esc(chartDef.id)}" aria-label="${esc(chartDef.title)} over time"></canvas></div>`
+    : `<p class="muted empty chart-empty">No samples yet.</p>`
+
+  return `<article class="time-chart" data-chart="${esc(chartDef.id)}" title="${esc(chartDef.hint || '')}">
+    <div class="time-chart-head">
+      <h3>${esc(chartDef.title)}</h3>
+      <div class="chart-legend">${legend}</div>
+    </div>
+    ${body}
+    ${summary}
+  </article>`
+}
+
+function bootstrapMetricsData() {
+  if (!metricsData || metricsData.error) {
+    metricsData = {
+      ok: true,
+      range: metricsRange,
+      series: {},
+      current: {},
+    }
+  }
+  if (!metricsData.series) metricsData.series = {}
+  syncMetricsCurrentFromState()
+  Object.entries(LIVE_METRIC_KEYS).forEach(([key, getter]) => {
+    if (!metricsData.series[key]?.length) {
+      upsertMetricSample(key, getter(), Date.now())
+    }
+  })
 }
 
 function renderMetricsSection() {
-  const cur = metricsData?.current || {}
+  bootstrapMetricsData()
   const err = metricsData?.error
-  const charts = METRIC_SERIES.map((cfg) => {
-    const points = metricsData?.series?.[cfg.key] || []
-    const latest = points.length ? points[points.length - 1].v : cur[cfg.key]
-    return renderMetricChart(cfg, points, latest)
-  }).join('')
-  const loading = !metricsData && !err
+  const charts = METRIC_CHARTS.map((cfg) => renderTimeSeriesChart(cfg)).join('')
   return `
     <section class="panel overview-panel metrics-panel">
       <div class="row head">
@@ -346,84 +857,48 @@ function renderMetricsSection() {
           </select>
         </label>
       </div>
-      <p class="hint">WebSocket clients, in-game sessions, and database pool health sampled about once per minute.</p>
+      <p class="hint">Connections and sessions update live. Database metrics refresh about once per minute.</p>
       ${err ? `<p class="bad">${esc(err)}</p>` : ''}
-      <div class="metrics-charts">${loading ? '<p class="muted">Loading metrics…</p>' : charts}</div>
+      <div class="metrics-charts">${charts}</div>
     </section>`
 }
 
-async function loadMetrics() {
+async function loadMetrics(options = {}) {
+  const { updateOverview = tab === 'overview' } = options
   try {
     metricsData = await api(`/admin/api/metrics?range=${encodeURIComponent(metricsRange)}`)
   } catch (e) {
     metricsData = { error: String(e.message || e), series: {}, current: {} }
+    bootstrapMetricsData()
   }
-  if (tab === 'overview') {
-    const main = $('#main')
-    if (main) {
-      main.innerHTML = renderOverview()
-      bindOverview(main)
-    }
+  syncMetricsCurrentFromState()
+  patchDbMetricsFromCurrent()
+  if (!updateOverview) return
+  const main = $('#main')
+  if (!main || tab !== 'overview') return
+  if (main.querySelector('#overview-metric-cards')) {
+    patchOverviewPanels(main)
+    updateMetricChartsData(true)
+    return
   }
+  destroyMetricCharts()
+  main.innerHTML = renderOverview()
+  bindOverview(main)
 }
 
 function renderOverview() {
-  const accounts = state.accounts || []
-  const users = state.users || []
-  const sessions = state.sessions || []
-  const connections = state.connections || []
-
-  const disabled = accounts.filter((a) => a.disabled).length
-  const restricted = accounts.filter((a) => a.restricted && !a.disabled).length
-  const elevated = accounts.filter((a) => !a.disabled && !a.restricted && (
-    (a.required_role_ids && a.required_role_ids.length) || a.required_role_id
-    || (a.required_user_ids && a.required_user_ids.length) || a.required_user_id
-    || (a.group_ids && a.group_ids.length)
-  )).length
-  const base = accounts.filter((a) => !a.disabled && !a.restricted
-    && !(a.required_role_ids && a.required_role_ids.length) && !a.required_role_id
-    && !(a.required_user_ids && a.required_user_ids.length) && !a.required_user_id
-    && !(a.group_ids && a.group_ids.length)).length
-  const revoked = users.filter((u) => u.access_revoked).length
-  const withToken = users.filter((u) => u.has_active_token && !u.access_revoked).length
-  const adminsOnline = connections.filter((c) => c.is_admin).length
-
   const liveLabel = liveConnected ? 'Live updates connected' : 'Live updates disconnected'
   const liveClass = liveConnected ? 'ok' : 'bad'
-
-  const onlineRows = sessions.slice(0, 8).map((s) => {
-    const acct = accounts.find((a) => a.id === s.account_id)
-    const u = users.find((x) => x.id === s.user_id)
-    return `<tr>
-      <td class="mono">${esc(acct?.username || `#${s.account_id}`)}</td>
-      <td>${esc(s.character_name || '—')}</td>
-      <td>${esc(u?.display_name || u?.discord_id || (s.user_id ? `#${s.user_id}` : '—'))}</td>
-    </tr>`
-  }).join('')
-
-  const connRows = [...connections]
-    .sort((a, b) => String(a.connected_at || '').localeCompare(String(b.connected_at || '')))
-    .slice(0, 8)
-    .map((c) => `<tr>
-      <td>${esc(c.display_name || c.discord_id || `#${c.user_id}`)}${c.is_admin ? ' <span class="muted">admin</span>' : ''}</td>
-      <td class="mono">${esc(c.client_version || '—')}</td>
-      <td>${esc(formatDuration(c.connected_at))}</td>
-    </tr>`).join('')
 
   return `
     <section class="panel overview-panel">
       <div class="row head">
         <h2>Overview</h2>
-        <span class="${liveClass}">${esc(liveLabel)}</span>
+        <span id="overview-live-badge" class="${liveClass}">${esc(liveLabel)}</span>
       </div>
       <p class="hint">High-level status across SSO accounts, users, private shares, and live clients. Click a metric to open that tab.</p>
-      <div class="metrics">
-        ${metric('EQ accounts', accounts.length, 'accounts', `${base} all · ${elevated} limited · ${restricted} shared · ${disabled} disabled`)}
-        ${metric('SSO users', users.length, 'users', `${withToken} with token · ${revoked} revoked`)}
-        ${metric('Groups', (state.groups || []).length, 'groups')}
-        ${metric('Private shares', restricted, 'shares')}
-        ${metric('GUI connected', connections.length, 'connections', adminsOnline ? `${adminsOnline} admin` : 'desktop clients')}
-        ${metric('Online in-game', sessions.length, 'sessions', 'presence heartbeats')}
+      <div id="overview-metric-cards" class="metrics">
+        ${renderOverviewMetricCards()}
       </div>
     </section>
     ${renderMetricsSection()}
@@ -436,7 +911,7 @@ function renderOverview() {
         <div class="table-wrap">
           <table class="data-table">
             <thead><tr><th>Account</th><th>Character</th><th>User</th></tr></thead>
-            <tbody>${onlineRows || '<tr><td colspan="3" class="empty">Nobody online.</td></tr>'}</tbody>
+            <tbody id="overview-online-body">${renderOverviewOnlineRows() || '<tr><td colspan="3" class="empty">Nobody online.</td></tr>'}</tbody>
           </table>
         </div>
       </section>
@@ -448,11 +923,17 @@ function renderOverview() {
         <div class="table-wrap">
           <table class="data-table">
             <thead><tr><th>User</th><th>Version</th><th>Connected</th></tr></thead>
-            <tbody>${connRows || '<tr><td colspan="3" class="empty">No GUI clients connected.</td></tr>'}</tbody>
+            <tbody id="overview-connections-body">${renderOverviewConnectionRows() || '<tr><td colspan="3" class="empty">No GUI clients connected.</td></tr>'}</tbody>
           </table>
         </div>
       </section>
     </div>`
+}
+
+function refreshOverviewDurations() {
+  document.querySelectorAll('.conn-duration[data-connected-at]').forEach((el) => {
+    el.textContent = formatDuration(el.dataset.connectedAt)
+  })
 }
 
 function bindOverview(root) {
@@ -466,6 +947,7 @@ function bindOverview(root) {
       }
     })
   })
+  mountMetricCharts(root)
 }
 
 function renderAccounts() {
@@ -1099,12 +1581,14 @@ function renderGroups() {
         }).join(', ')
       : '—'
     const web = g.web_role || ''
+    const cmds = discordCommandsLabel(g.discord_commands)
     return `<tr>
       <td class="col-name">
         <strong>${esc(g.name)}</strong>
         ${g.description ? `<div class="muted">${esc(g.description)}</div>` : ''}
       </td>
       <td>${esc(webRoleLabel(web))}${web ? '' : '<div class="muted">No web login</div>'}</td>
+      <td>${esc(cmds)}${cmds === '—' ? '<div class="muted">No slash commands</div>' : ''}</td>
       <td>${esc(usersLabel)}</td>
       <td>${esc(rolesLabel)}</td>
       <td class="mono">${esc(accountsLabel)}</td>
@@ -1122,23 +1606,25 @@ function renderGroups() {
       </div>
       <p class="hint">
         Groups bundle Discord <strong>users</strong> and/or <strong>roles</strong>, and link EQ <strong>accounts</strong>.
-        Optionally grant <strong>web UI</strong> access (admin or read-only) to group members.
-        Discord admin role and bootstrap admins always have full web access.
+        Optionally grant <strong>web UI</strong> access (admin or read-only) and/or <strong>Discord slash commands</strong> to group members.
+        When any group enables a slash command, only members of groups with that command may use it.
+        Discord admin role and bootstrap admins always have full web access and bypass slash command restrictions.
       </p>
       <div class="table-wrap">
         <table class="data-table groups-table">
           <colgroup>
-            <col class="w-name"/><col/><col class="w-users"/><col class="w-roles"/><col class="w-accts"/><col class="w-actions"/>
+            <col class="w-name"/><col/><col/><col class="w-users"/><col class="w-roles"/><col class="w-accts"/><col class="w-actions"/>
           </colgroup>
           <thead><tr>
             ${sortTh('groups', 'name', 'Name')}
             ${sortTh('groups', 'web', 'Web UI')}
+            <th>Discord commands</th>
             ${sortTh('groups', 'users', 'Discord users')}
             ${sortTh('groups', 'roles', 'Discord roles')}
             ${sortTh('groups', 'accounts', 'EQ accounts')}
             <th class="col-actions"></th>
           </tr></thead>
-          <tbody>${rows || '<tr><td colspan="6" class="empty">No groups yet.</td></tr>'}</tbody>
+          <tbody>${rows || '<tr><td colspan="7" class="empty">No groups yet.</td></tr>'}</tbody>
         </table>
       </div>
     </section>`
@@ -1185,6 +1671,11 @@ function openEditGroupModal(group) {
             </select>
           </div>
           <div class="form-span">
+            <label>Discord slash commands</label>
+            <p class="hint">Members may use the selected bot commands. When any group enables a command, users outside those groups are denied.</p>
+            <div class="role-list">${discordCommandsFieldHTML(group.discord_commands)}</div>
+          </div>
+          <div class="form-span">
             <label>Discord users</label>
             <p class="hint">Select none, one, or more. Members can use linked EQ accounts.</p>
             <div class="role-list">${userItems}</div>
@@ -1228,6 +1719,7 @@ function openEditGroupModal(group) {
         name,
         description: root.querySelector('#m-desc').value.trim(),
         web_role: root.querySelector('#m-web-role').value,
+        discord_commands: readDiscordCommandsFromModal(root),
         user_ids,
         role_ids,
         account_ids,
@@ -1251,6 +1743,11 @@ function bindGroups(root) {
           <option value="admin">Admin</option>
         </select>
       </div>
+      <div>
+        <label>Discord slash commands</label>
+        <p class="hint">When any group enables a command, only members of groups with that command may use it.</p>
+        <div class="role-list">${discordCommandsFieldHTML([])}</div>
+      </div>
     `, (el) => run(async () => {
       const name = el.querySelector('#m-name').value.trim()
       if (!name) throw new Error('name required')
@@ -1260,6 +1757,7 @@ function bindGroups(root) {
           name,
           description: el.querySelector('#m-desc').value.trim(),
           web_role: el.querySelector('#m-web-role').value,
+          discord_commands: readDiscordCommandsFromModal(el),
         }),
       })
       closeModal()
@@ -1378,6 +1876,144 @@ function formatAuditTime(iso) {
   return esc(d.toLocaleString())
 }
 
+function buildAuditAccountOptions() {
+  return (state.accounts || []).slice()
+    .sort((a, b) => String(a.username || '').localeCompare(String(b.username || ''), undefined, { sensitivity: 'base' }))
+    .map((a) => {
+      const aliases = (a.aliases || []).filter((x) => !a.username || x.toLowerCase() !== a.username.toLowerCase())
+      const tags = a.tags || []
+      const subParts = []
+      if (aliases.length) subParts.push(aliases.join(', '))
+      if (tags.length) subParts.push(tags.join(', '))
+      if (a.disabled) subParts.push('disabled')
+      return {
+        value: a.id,
+        label: a.username || `#${a.id}`,
+        sub: subParts.join(' · ') || `#${a.id}`,
+        search: [a.username, ...aliases, ...tags, String(a.id)].filter(Boolean).join(' ').toLowerCase(),
+      }
+    })
+}
+
+function buildAuditUserOptions() {
+  return (state.users || []).slice()
+    .sort((a, b) => String(a.display_name || a.discord_id || '')
+      .localeCompare(String(b.display_name || b.discord_id || ''), undefined, { sensitivity: 'base' }))
+    .map((u) => {
+      const subParts = []
+      if (u.display_name && u.discord_id) subParts.push(u.discord_id)
+      else subParts.push(`#${u.id}`)
+      if (u.access_revoked) subParts.push('revoked')
+      return {
+        value: u.id,
+        label: u.display_name || u.discord_id || `#${u.id}`,
+        sub: subParts.join(' · '),
+        search: [u.display_name, u.discord_id, String(u.id)].filter(Boolean).join(' ').toLowerCase(),
+      }
+    })
+}
+
+function renderSearchSelect({ id, allLabel, value, options, placeholder }) {
+  const allOption = { value: 0, label: allLabel, sub: '', search: allLabel.toLowerCase() }
+  const selected = value === 0
+    ? allOption
+    : options.find((o) => o.value === value) || allOption
+  const optionHtml = [allOption, ...options].map((o) => `
+    <button type="button" class="search-select-option${o.value === value ? ' selected' : ''}"
+      data-value="${o.value}" data-search="${esc(o.search || '')}" role="option"
+      aria-selected="${o.value === value ? 'true' : 'false'}">
+      <span class="search-select-option-label">${esc(o.label)}</span>
+      ${o.sub ? `<span class="search-select-option-sub muted">${esc(o.sub)}</span>` : ''}
+    </button>`).join('')
+  return `
+    <div class="search-select" data-search-select="${esc(id)}">
+      <button type="button" class="search-select-trigger" aria-haspopup="listbox" aria-expanded="false">
+        <span class="search-select-value">
+          <span class="search-select-label">${esc(selected.label)}</span>
+          ${selected.sub ? `<span class="search-select-sub muted">${esc(selected.sub)}</span>` : ''}
+        </span>
+        <span class="search-select-caret" aria-hidden="true">▾</span>
+      </button>
+      <div class="search-select-menu hidden" role="listbox">
+        <div class="search-select-search-wrap">
+          <input type="search" class="search-select-search" placeholder="${esc(placeholder)}"
+            autocomplete="off" aria-label="${esc(placeholder)}">
+        </div>
+        <div class="search-select-list">${optionHtml}</div>
+      </div>
+    </div>`
+}
+
+function bindSearchSelects(root, handlers) {
+  root.querySelectorAll('[data-search-select]').forEach((wrap) => {
+    const id = wrap.dataset.searchSelect
+    const trigger = wrap.querySelector('.search-select-trigger')
+    const menu = wrap.querySelector('.search-select-menu')
+    const search = wrap.querySelector('.search-select-search')
+    const list = wrap.querySelector('.search-select-list')
+    const onChange = handlers[id]
+    if (!trigger || !menu || !search || !list || !onChange) return
+
+    let outsideHandler = null
+    const close = () => {
+      menu.classList.add('hidden')
+      trigger.setAttribute('aria-expanded', 'false')
+      if (outsideHandler) {
+        document.removeEventListener('click', outsideHandler)
+        outsideHandler = null
+      }
+    }
+    const filterOptions = (query) => {
+      const needle = query.trim().toLowerCase()
+      list.querySelectorAll('.search-select-option').forEach((opt) => {
+        const hay = opt.dataset.search || opt.textContent.toLowerCase()
+        opt.hidden = Boolean(needle && !hay.includes(needle))
+      })
+    }
+    const open = () => {
+      root.querySelectorAll('[data-search-select]').forEach((other) => {
+        if (other === wrap) return
+        other.querySelector('.search-select-menu')?.classList.add('hidden')
+        other.querySelector('.search-select-trigger')?.setAttribute('aria-expanded', 'false')
+      })
+      menu.classList.remove('hidden')
+      trigger.setAttribute('aria-expanded', 'true')
+      search.value = ''
+      filterOptions('')
+      search.focus()
+      outsideHandler = (e) => {
+        if (!wrap.contains(e.target)) close()
+      }
+      setTimeout(() => document.addEventListener('click', outsideHandler), 0)
+    }
+    const selectOption = (opt) => {
+      const value = Number(opt.dataset.value) || 0
+      close()
+      onChange(value)
+    }
+
+    trigger.addEventListener('click', (e) => {
+      e.stopPropagation()
+      if (menu.classList.contains('hidden')) open()
+      else close()
+    })
+    search.addEventListener('input', () => filterOptions(search.value))
+    search.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        close()
+        trigger.focus()
+      }
+    })
+    list.querySelectorAll('.search-select-option').forEach((opt) => {
+      opt.addEventListener('click', (e) => {
+        e.stopPropagation()
+        selectOption(opt)
+      })
+    })
+  })
+}
+
 async function loadAudit(reset) {
   if (auditLoading) return
   auditLoading = true
@@ -1426,25 +2062,28 @@ function renderAudit() {
     </tr>`
   }).join('')
 
-  const acctOpts = [`<option value="0">All EQ accounts</option>`]
-    .concat((state.accounts || []).map((a) =>
-      `<option value="${a.id}" ${auditFilterAccount === a.id ? 'selected' : ''}>${esc(a.username || '#' + a.id)}</option>`))
-    .join('')
-
-  const userOpts = [`<option value="0">All Discord users</option>`]
-    .concat((state.users || []).slice().sort((a, b) =>
-      String(a.display_name || a.discord_id || '').localeCompare(String(b.display_name || b.discord_id || ''), undefined, {sensitivity: 'base'}),
-    ).map((u) =>
-      `<option value="${u.id}" ${auditFilterUser === u.id ? 'selected' : ''}>${esc(u.display_name || u.discord_id || '#' + u.id)}</option>`))
-    .join('')
+  const acctOpts = buildAuditAccountOptions()
+  const userOpts = buildAuditUserOptions()
 
   return `
     <section class="panel">
       <div class="row head">
         <h2>Account audit log</h2>
-        <div class="actions">
-          <select id="audit-user-filter" title="Filter by Discord user (actor)">${userOpts}</select>
-          <select id="audit-account-filter" title="Filter by EQ account">${acctOpts}</select>
+        <div class="actions audit-filters">
+          ${renderSearchSelect({
+            id: 'audit-user-filter',
+            allLabel: 'All Discord users',
+            value: auditFilterUser,
+            options: userOpts,
+            placeholder: 'Search users…',
+          })}
+          ${renderSearchSelect({
+            id: 'audit-account-filter',
+            allLabel: 'All EQ accounts',
+            value: auditFilterAccount,
+            options: acctOpts,
+            placeholder: 'Search accounts…',
+          })}
           <button type="button" class="secondary" id="audit-refresh">Refresh</button>
         </div>
       </div>
@@ -1471,13 +2110,15 @@ function renderAudit() {
 function bindAudit(root) {
   root.querySelector('#audit-refresh')?.addEventListener('click', () => loadAudit(true))
   root.querySelector('#audit-more')?.addEventListener('click', () => loadAudit(false))
-  root.querySelector('#audit-account-filter')?.addEventListener('change', (ev) => {
-    auditFilterAccount = Number(ev.target.value) || 0
-    loadAudit(true)
-  })
-  root.querySelector('#audit-user-filter')?.addEventListener('change', (ev) => {
-    auditFilterUser = Number(ev.target.value) || 0
-    loadAudit(true)
+  bindSearchSelects(root, {
+    'audit-account-filter': (value) => {
+      auditFilterAccount = value
+      loadAudit(true)
+    },
+    'audit-user-filter': (value) => {
+      auditFilterUser = value
+      loadAudit(true)
+    },
   })
 }
 
@@ -1592,6 +2233,7 @@ function render() {
     ? `${me.display_name || me.discord_id} · ${webRoleLabel(role)}`
     : ''
   document.body.classList.toggle('readonly', !isWebAdmin())
+  if (tab !== 'overview') destroyMetricCharts()
   const main = $('#main')
   if (connDurationTimer) {
     clearInterval(connDurationTimer)
@@ -1602,17 +2244,16 @@ function render() {
     metricsRefreshTimer = null
   }
   if (tab === 'overview') {
+    bootstrapMetricsData()
+    destroyMetricCharts()
     main.innerHTML = renderOverview()
     bindOverview(main)
-    if (!metricsData) loadMetrics()
+    if (!metricsData?.since) loadMetrics()
     metricsRefreshTimer = setInterval(() => {
       if (tab === 'overview') loadMetrics()
-    }, 60000)
+    }, 30000)
     connDurationTimer = setInterval(() => {
-      if (tab === 'overview') {
-        main.innerHTML = renderOverview()
-        bindOverview(main)
-      }
+      if (tab === 'overview') refreshOverviewDurations()
     }, 5000)
   } else if (tab === 'accounts') {
     main.innerHTML = renderAccounts()
@@ -1658,7 +2299,8 @@ async function boot() {
     })
   }
   me = await api('/admin/api/me')
-  await refreshState()
+  await refreshState(true)
+  await loadMetrics({ updateOverview: false })
   connectLive()
   render()
 }

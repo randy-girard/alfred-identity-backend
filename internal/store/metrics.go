@@ -15,7 +15,19 @@ const (
 	MetricDBIdleConns     = "db_idle_connections"
 )
 
-// OverviewMetrics lists series returned to the admin overview charts.
+// CountMetrics are whole-number gauges (connections, sessions, pool size).
+var CountMetrics = map[string]bool{
+	MetricGUIConnections: true,
+	MetricGameSessions:   true,
+	MetricDBOpenConns:    true,
+	MetricDBInUseConns:   true,
+	MetricDBIdleConns:    true,
+}
+
+// IsCountMetric reports whether values should be aggregated and shown as integers.
+func IsCountMetric(name string) bool {
+	return CountMetrics[name]
+}
 var OverviewMetrics = []string{
 	MetricGUIConnections,
 	MetricGameSessions,
@@ -54,7 +66,8 @@ func (s *Store) RecordMetricSamples(ctx context.Context, ts time.Time, values ma
 	return tx.Commit()
 }
 
-// QueryMetricSeries returns averaged bucketed samples since the given time.
+// QueryMetricSeries returns bucketed samples since the given time.
+// Count metrics use max per bucket; latency uses average.
 func (s *Store) QueryMetricSeries(ctx context.Context, since time.Time, bucket time.Duration) (map[string][]MetricPoint, error) {
 	if s == nil || s.DB == nil {
 		return nil, fmt.Errorf("store not ready")
@@ -66,11 +79,18 @@ func (s *Store) QueryMetricSeries(ctx context.Context, since time.Time, bucket t
 	rows, err := s.DB.QueryContext(ctx, `
 SELECT metric,
        to_timestamp((floor(extract(epoch from ts) / $1) * $1)) AT TIME ZONE 'UTC' AS bucket,
-       avg(value)
+       CASE
+         WHEN metric IN ($3, $4, $5, $6, $7) THEN max(value)
+         ELSE avg(value)
+       END
 FROM metrics_samples
 WHERE ts >= $2
 GROUP BY metric, bucket
-ORDER BY bucket`, bucketSec, since.UTC())
+ORDER BY bucket`,
+		bucketSec, since.UTC(),
+		MetricGUIConnections, MetricGameSessions,
+		MetricDBOpenConns, MetricDBInUseConns, MetricDBIdleConns,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -83,11 +103,14 @@ ORDER BY bucket`, bucketSec, since.UTC())
 	for rows.Next() {
 		var name string
 		var bucketTS time.Time
-		var avg float64
-		if err := rows.Scan(&name, &bucketTS, &avg); err != nil {
+		var val float64
+		if err := rows.Scan(&name, &bucketTS, &val); err != nil {
 			return nil, err
 		}
-		out[name] = append(out[name], MetricPoint{T: bucketTS.UTC(), V: avg})
+		if IsCountMetric(name) {
+			val = float64(int64(val + 0.5)) // round max/sample to whole number
+		}
+		out[name] = append(out[name], MetricPoint{T: bucketTS.UTC(), V: val})
 	}
 	return out, rows.Err()
 }

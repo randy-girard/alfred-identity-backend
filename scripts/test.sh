@@ -26,7 +26,7 @@ if [[ "$COVERAGE" -eq 1 ]]; then
   python3 "$GEN" \
     --profile coverage/coverage.out \
     --out coverage \
-    --title "Alfred Identity — web" \
+    --title "alfred-identity-backend — web" \
     --module github.com/alfred-identity/web
 else
   echo "→ go test"

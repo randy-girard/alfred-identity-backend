@@ -96,15 +96,20 @@ func (s *Sampler) sample(ctx context.Context) {
 // PingLatencyMS measures database round-trip latency in milliseconds.
 func PingLatencyMS(db *sql.DB) func(ctx context.Context) (float64, bool) {
 	return func(ctx context.Context) (float64, bool) {
-		if db == nil {
-			return 0, false
-		}
-		start := time.Now()
-		if err := db.PingContext(ctx); err != nil {
-			return 0, false
-		}
-		return float64(time.Since(start).Milliseconds()), true
+		return MeasurePingLatencyMS(ctx, db)
 	}
+}
+
+// MeasurePingLatencyMS returns ping latency in fractional milliseconds.
+func MeasurePingLatencyMS(ctx context.Context, db *sql.DB) (float64, bool) {
+	if db == nil {
+		return 0, false
+	}
+	start := time.Now()
+	if err := db.PingContext(ctx); err != nil {
+		return 0, false
+	}
+	return float64(time.Since(start).Microseconds()) / 1000.0, true
 }
 
 // PoolStats reads sql.DB pool counters.
