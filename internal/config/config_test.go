@@ -120,3 +120,83 @@ func TestLoadWebRequiresDiscord(t *testing.T) {
 		t.Fatal("expected WEB_ENABLED requires Discord")
 	}
 }
+
+func TestLoadDiscordRequiresToken(t *testing.T) {
+	key := make([]byte, 32)
+	t.Setenv("DATA_ENCRYPTION_KEY", base64.StdEncoding.EncodeToString(key))
+	t.Setenv("DISCORD_ENABLED", "true")
+	t.Setenv("DISCORD_TOKEN", "")
+	t.Setenv("WEB_ENABLED", "false")
+	if _, err := Load(); err == nil {
+		t.Fatal("expected DISCORD_TOKEN required")
+	}
+}
+
+func TestLoadWebHappyAndFallbacks(t *testing.T) {
+	key := make([]byte, 32)
+	t.Setenv("DATA_ENCRYPTION_KEY", base64.StdEncoding.EncodeToString(key))
+	t.Setenv("DISCORD_ENABLED", "true")
+	t.Setenv("DISCORD_TOKEN", "tok")
+	t.Setenv("WEB_ENABLED", "true")
+	t.Setenv("DISCORD_CLIENT_ID", "cid")
+	t.Setenv("DISCORD_CLIENT_SECRET", "sec")
+	t.Setenv("DISCORD_GUILD_ID", "gid")
+	t.Setenv("WEB_PUBLIC_URL", "https://identity.example.com/")
+	t.Setenv("DISCORD_ADMIN_ROLE_ID", "admin-role")
+	t.Setenv("WEB_ACCESS_ROLE_ID", "")
+	t.Setenv("DISCORD_BOOTSTRAP_ADMIN_IDS", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.WebPublicURL != "https://identity.example.com" {
+		t.Fatalf("public url %q", cfg.WebPublicURL)
+	}
+	if cfg.WebAccessRoleID != "admin-role" {
+		t.Fatalf("fallback access role %q", cfg.WebAccessRoleID)
+	}
+}
+
+func TestLoadWebRequiresAccessPath(t *testing.T) {
+	key := make([]byte, 32)
+	t.Setenv("DATA_ENCRYPTION_KEY", base64.StdEncoding.EncodeToString(key))
+	t.Setenv("DISCORD_ENABLED", "true")
+	t.Setenv("DISCORD_TOKEN", "tok")
+	t.Setenv("WEB_ENABLED", "true")
+	t.Setenv("DISCORD_CLIENT_ID", "cid")
+	t.Setenv("DISCORD_CLIENT_SECRET", "sec")
+	t.Setenv("DISCORD_GUILD_ID", "gid")
+	t.Setenv("WEB_PUBLIC_URL", "http://127.0.0.1:8181")
+	t.Setenv("DISCORD_ADMIN_ROLE_ID", "")
+	t.Setenv("WEB_ACCESS_ROLE_ID", "")
+	t.Setenv("DISCORD_BOOTSTRAP_ADMIN_IDS", "")
+	if _, err := Load(); err == nil {
+		t.Fatal("expected access role / bootstrap required")
+	}
+
+	t.Setenv("DISCORD_BOOTSTRAP_ADMIN_IDS", "111,222")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.DiscordBootstrapAdmins) != 2 {
+		t.Fatalf("%#v", cfg.DiscordBootstrapAdmins)
+	}
+}
+
+func TestLoadWebMissingClient(t *testing.T) {
+	key := make([]byte, 32)
+	t.Setenv("DATA_ENCRYPTION_KEY", base64.StdEncoding.EncodeToString(key))
+	t.Setenv("DISCORD_ENABLED", "true")
+	t.Setenv("DISCORD_TOKEN", "tok")
+	t.Setenv("WEB_ENABLED", "true")
+	t.Setenv("DISCORD_CLIENT_ID", "")
+	t.Setenv("DISCORD_CLIENT_SECRET", "")
+	t.Setenv("DISCORD_GUILD_ID", "gid")
+	t.Setenv("WEB_PUBLIC_URL", "http://127.0.0.1:8181")
+	t.Setenv("DISCORD_BOOTSTRAP_ADMIN_IDS", "1")
+	if _, err := Load(); err == nil {
+		t.Fatal("expected client id/secret required")
+	}
+}
