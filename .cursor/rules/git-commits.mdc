@@ -1,0 +1,48 @@
+---
+description: Git commit message format — Conventional Commits, one line only
+alwaysApply: true
+---
+
+# Git commit messages
+
+When creating git commits (only when the user asks):
+
+- **One line only** — subject line, no body, no blank line, no bullet lists
+- **Conventional Commits** — `type: imperative summary` (lowercase type, no scope required)
+- **Imperative mood** — "add feature" not "added feature"
+- **Short** — aim for ≤72 characters; drop filler words
+- **No period** at the end of the subject line
+
+## Allowed types
+
+`feat`, `fix`, `refactor`, `chore`, `build`, `ci`, `docs`, `test`, `perf`, `style`
+
+Use the type that best matches the change. Prefer `fix` for bugs, `feat` for user-visible behavior, `chore` for housekeeping.
+
+## Examples
+
+```
+feat: add P99 Login Proxy import and update checking
+fix: prevent crash when checking updates from menu bar
+build: stamp dev version from git at link time
+ci: replace auto build workflow with manual release workflow
+chore: rebrand web admin as alfred-identity-backend
+refactor: centralize app name and config directory
+docs: document SSO_SOURCE_NAME for Discord /sso get
+test: cover discord command group restrictions
+```
+
+## Avoid
+
+```
+# Bad — multi-line body
+feat: add import modal
+
+Adds discovery and folder picker.
+
+# Bad — no type
+Added update checking
+
+# Bad — past tense
+feat: added update checking
+```
