@@ -1,0 +1,38 @@
+---
+description: Keep README.md accurate when changing daemon, admin UI, or Discord behavior
+globs: internal/**/*,cmd/**/*,docs/**/*,.env.example,docker-compose.yml,scripts/**/*
+alwaysApply: false
+---
+
+# README sync (Alfred Identity Backend)
+
+When you change user-visible behavior, API routes, env vars, Discord commands, web admin tabs, or project layout, update **README.md** in the same change (or immediately after).
+
+## What to keep in sync
+
+- **Help section** — Compose quick start, SSO token flow, access model, Discord commands, web admin tabs
+- **Endpoints table** — `/health`, `/ws/sso`, `/admin/` (do not document routes that are not implemented)
+- **Project layout** — `cmd/` and `internal/` packages
+- **Environment variables** — must match `.env.example` and `internal/config/config.go`
+- **Discord commands** — must match `internal/discord/bot.go` (`commandDefs`, subcommands)
+- **Web admin tabs** — must match `TABS` in `internal/web/static/app.js`
+- **Branding** — `Alfred Identity Management` (web), `Alfred Identity` (desktop GUI); see `internal/web/names.go`
+
+## Sources of truth
+
+| Topic | Check |
+|-------|--------|
+| Env vars | `.env.example`, `internal/config/config.go` |
+| Discord slash commands | `internal/discord/bot.go` |
+| Web admin UI | `internal/web/static/app.js`, `internal/web/names.go` |
+| HTTP routes | `cmd/daemon/main.go`, `internal/web/server.go` |
+| SSO source JSON shape | `internal/web/source_import.go`, Discord `handleSSO` |
+| Tests / coverage | `Makefile`, `scripts/test.sh`, `.github/workflows/test.yml` |
+
+## Do not
+
+- Document `/sso create` — the subcommand is **`get`** (creates if missing)
+- Document `GET /sso-source.json` unless a handler exists in `internal/web/server.go` or `cmd/daemon/main.go`
+- Describe GUI flows that belong in the `alfred-identity` README — link there instead
+
+Keep README concise; link to `docs/` for long setup guides.
