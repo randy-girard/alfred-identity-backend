@@ -200,3 +200,33 @@ func TestLoadWebMissingClient(t *testing.T) {
 		t.Fatal("expected client id/secret required")
 	}
 }
+
+func TestLoadKeyAndWebURLGates(t *testing.T) {
+	t.Setenv("DATA_ENCRYPTION_KEY", "!!!not-base64!!!")
+	if _, err := Load(); err == nil {
+		t.Fatal("expected bad base64")
+	}
+	t.Setenv("DATA_ENCRYPTION_KEY", base64.StdEncoding.EncodeToString([]byte("short")))
+	if _, err := Load(); err == nil {
+		t.Fatal("expected wrong key length")
+	}
+
+	key := make([]byte, 32)
+	t.Setenv("DATA_ENCRYPTION_KEY", base64.StdEncoding.EncodeToString(key))
+	t.Setenv("DISCORD_ENABLED", "true")
+	t.Setenv("DISCORD_TOKEN", "tok")
+	t.Setenv("WEB_ENABLED", "true")
+	t.Setenv("DISCORD_CLIENT_ID", "cid")
+	t.Setenv("DISCORD_CLIENT_SECRET", "sec")
+	t.Setenv("DISCORD_GUILD_ID", "")
+	t.Setenv("WEB_PUBLIC_URL", "http://127.0.0.1:8181")
+	t.Setenv("DISCORD_BOOTSTRAP_ADMIN_IDS", "1")
+	if _, err := Load(); err == nil {
+		t.Fatal("expected guild required")
+	}
+	t.Setenv("DISCORD_GUILD_ID", "gid")
+	t.Setenv("WEB_PUBLIC_URL", "")
+	if _, err := Load(); err == nil {
+		t.Fatal("expected public url required")
+	}
+}
