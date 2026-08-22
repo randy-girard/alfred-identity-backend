@@ -1,6 +1,6 @@
-# alfred-identity-web
+# alfred-identity-backend
 
-Go service for Discord-managed EQ bot/SSO accounts, Postgres-backed secrets (AES-GCM), and a WebSocket SSO API consumed by the **Alfred Identity** desktop app (alfred-identity-app).
+Go service for Discord-managed EQ bot/SSO accounts, Postgres-backed secrets (AES-GCM), and a WebSocket SSO API consumed by the **alfred-identity** desktop GUI.
 
 ## Quick start (Docker Compose)
 
@@ -25,7 +25,7 @@ In production, terminate TLS at an external reverse proxy and point the GUI at `
 
 ## Web admin
 
-Optional Discord OAuth UI for the same account/user/session management as the desktop app (alfred-identity-app). Enable with `WEB_ENABLED=true` and configure OAuth redirect + client secret — see [docs/web-admin.md](docs/web-admin.md). Mutations broadcast to all SSO WebSocket clients immediately.
+Optional Discord OAuth UI for the same account/user/session management as **Alfred Identity**. Enable with `WEB_ENABLED=true` and configure OAuth redirect + client secret — see [docs/web-admin.md](docs/web-admin.md). Mutations broadcast to all SSO WebSocket clients immediately.
 
 ## SSO token for the GUI
 
@@ -40,7 +40,7 @@ Any valid SSO token gets **base** access to all non-elevated EQ accounts. Elevat
 go run ./cmd/seedtoken <discord_id> <display_name>
 ```
 
-Paste the printed token into the GUI **SSO** tab as a source URL `ws://127.0.0.1:8181/ws/sso`.
+Paste the printed token into **Alfred Identity** as a source URL `ws://127.0.0.1:8181/ws/sso`.
 
 ## Discord
 
@@ -54,7 +54,7 @@ Useful Discord commands: SSO tokens (`create` / `get` / `list` / `revoke`) and w
 - [docs/ws-api.md](docs/ws-api.md) — WebSocket contract (mirrored in the GUI)
 - [docs/web-admin.md](docs/web-admin.md) — Discord OAuth web admin
 - [docs/deploy-tls.md](docs/deploy-tls.md) — external TLS reverse proxy
-- [../alfred-identity-app/README.md](../alfred-identity-app/README.md) — Alfred Identity desktop app (alfred-identity-app)
+- [../alfred-identity-app/README.md](../alfred-identity-app/README.md) — Alfred Identity desktop app (`alfred-identity` project)
 
 ## Build (binary only)
 

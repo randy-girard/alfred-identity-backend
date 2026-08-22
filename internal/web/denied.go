@@ -12,7 +12,7 @@ func (s *Server) handleDenied(w http.ResponseWriter, r *http.Request) {
 	}
 	reason := r.URL.Query().Get("reason")
 	title := "Access denied"
-	detail := "Your Discord account is not allowed to use the Alfred Identity web admin."
+	detail := "Your Discord account is not allowed to use the " + AppName + " web admin."
 	switch reason {
 	case "revoked":
 		title = "SSO access revoked"
@@ -28,7 +28,7 @@ func (s *Server) handleDenied(w http.ResponseWriter, r *http.Request) {
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>%s · Alfred Identity</title>
+  <title>%s · %s</title>
   <style>
     :root { color-scheme: light dark; --bg:#0f1419; --card:#1a222c; --text:#e8eef4; --muted:#9aa7b5; --accent:#6cb6ff; --border:#2a3542; }
     @media (prefers-color-scheme: light) {
@@ -56,7 +56,7 @@ func (s *Server) handleDenied(w http.ResponseWriter, r *http.Request) {
     </div>
   </div>
 </body>
-</html>`, title, title, detail, BasePath, BasePath)
+</html>`, title, AppName, title, detail, BasePath, BasePath)
 }
 
 func (s *Server) rejectIfReadonly(w http.ResponseWriter, r *http.Request) bool {

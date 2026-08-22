@@ -1,4 +1,4 @@
-name: alfred-identity
+name: alfred-identity-backend
 
 services:
   postgres:

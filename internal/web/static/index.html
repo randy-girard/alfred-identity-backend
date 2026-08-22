@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>Alfred Identity Admin</title>
+  <title>alfred-identity-backend</title>
   <script>
     (function () {
       try {
@@ -16,11 +16,13 @@
     })();
   </script>
   <link rel="stylesheet" href="/admin/app.css"/>
+  <script src="/admin/vendor/chart.umd.min.js"></script>
+  <script src="/admin/vendor/chartjs-adapter-date-fns.bundle.min.js"></script>
 </head>
 <body>
   <div id="app" class="shell">
     <header class="top">
-      <div class="brand">Alfred Identity</div>
+      <div class="brand">alfred-identity-backend</div>
       <nav class="tabs" id="tabs" role="tablist"></nav>
       <div class="userbar">
         <button type="button" class="secondary" id="theme-toggle" aria-label="Toggle theme">Dark</button>

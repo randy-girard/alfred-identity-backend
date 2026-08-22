@@ -8,7 +8,7 @@ import (
 	"github.com/alfred-identity/web/internal/config"
 )
 
-// SourceImportJSON is pasted into Alfred Identity → Connections → Add from JSON.
+// SourceImportJSON is pasted into alfred-identity → Connections → Add from JSON.
 type SourceImportJSON struct {
 	Name  string `json:"name"`
 	Host  string `json:"host"`
@@ -64,10 +64,10 @@ func SourceNameFromConfig(cfg config.Config) string {
 	return defaultSourceName(SourceHostFromConfig(cfg))
 }
 
-// BuildSourceImportJSON returns indented JSON for paste into Alfred Identity.
+// BuildSourceImportJSON returns indented JSON for paste into alfred-identity.
 func BuildSourceImportJSON(name, host, token, notes string) string {
 	if notes == "" {
-		notes = "Paste into Alfred Identity → Connections → Add from JSON."
+		notes = "Paste into " + DesktopAppName + " → Connections → Add from JSON."
 	}
 	obj := SourceImportJSON{
 		Name:  name,
