@@ -199,8 +199,31 @@ func TestMetricsRecordAndQuery(t *testing.T) {
 		t.Fatalf("series=%v", series)
 	}
 	last := gui[len(gui)-1].V
-	if last < 4 || last > 6 {
-		t.Fatalf("avg=%v points=%v", last, gui)
+	if last != 6 {
+		t.Fatalf("max=%v points=%v", last, gui)
+	}
+	lat := series[store.MetricDBLatencyMS]
+	if len(lat) == 0 || lat[0].V != 3.5 {
+		t.Fatalf("latency=%v", lat)
+	}
+	// Two connection samples in the same bucket should aggregate with max, not avg.
+	bucket := now.Add(30 * time.Second)
+	if err := st.RecordMetricSamples(ctx, bucket, map[string]float64{store.MetricGUIConnections: 2}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.RecordMetricSamples(ctx, bucket.Add(10*time.Second), map[string]float64{store.MetricGUIConnections: 5}); err != nil {
+		t.Fatal(err)
+	}
+	series, err = st.QueryMetricSeries(ctx, now.Add(-time.Hour), time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range series[store.MetricGUIConnections] {
+		if p.T.Equal(now.Truncate(time.Minute)) || p.T.Equal(bucket.Truncate(time.Minute)) {
+			if p.V == 3.5 || p.V == 3 || p.V == 3.0 {
+				t.Fatalf("expected integer max, got %v at %v", p.V, p.T)
+			}
+		}
 	}
 }
 

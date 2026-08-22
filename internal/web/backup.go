@@ -35,6 +35,7 @@ type ConfigBackupGroup struct {
 	Name             string   `json:"name"`
 	Description      string   `json:"description"`
 	WebRole          string   `json:"web_role"`
+	DiscordCommands  []string `json:"discord_commands,omitempty"`
 	MemberDiscordIDs []string `json:"member_discord_ids"`
 	MemberRoleIDs    []string `json:"member_role_ids"`
 	AccountUsernames []string `json:"account_usernames"`
@@ -185,6 +186,7 @@ func (s *Server) exportConfigBackup(ctx context.Context) (ConfigBackup, error) {
 			Name:             g.Name,
 			Description:      g.Description,
 			WebRole:          g.WebRole,
+			DiscordCommands:  append([]string(nil), g.DiscordCommands...),
 			MemberDiscordIDs: []string{},
 			MemberRoleIDs:    append([]string(nil), g.RoleIDs...),
 			AccountUsernames: []string{},
@@ -381,14 +383,14 @@ func (s *Server) importConfigBackup(ctx context.Context, r io.Reader) (ConfigImp
 		}
 		webRole := row.WebRole
 		if !found {
-			gid, err = s.store.CreateGroup(ctx, name, row.Description, webRole)
+			gid, err = s.store.CreateGroup(ctx, name, row.Description, webRole, row.DiscordCommands)
 			if err != nil {
 				res.Errors = append(res.Errors, fmt.Sprintf("group %s create: %v", name, err))
 				continue
 			}
 			res.GroupsAdded++
 		} else {
-			if err := s.store.UpdateGroupMeta(ctx, gid, name, row.Description, webRole); err != nil {
+			if err := s.store.UpdateGroupMeta(ctx, gid, name, row.Description, webRole, row.DiscordCommands); err != nil {
 				res.Errors = append(res.Errors, fmt.Sprintf("group %s update: %v", name, err))
 				continue
 			}

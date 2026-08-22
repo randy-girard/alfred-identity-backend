@@ -323,7 +323,7 @@ func (s *Store) UserByToken(ctx context.Context, rawToken string) (User, int64, 
 	return u, tokenID, nil
 }
 
-func (s *Store) CreateGroup(ctx context.Context, name, desc, webRole string) (int64, error) {
+func (s *Store) CreateGroup(ctx context.Context, name, desc, webRole string, discordCommands []string) (int64, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return 0, fmt.Errorf("name required")
@@ -332,10 +332,14 @@ func (s *Store) CreateGroup(ctx context.Context, name, desc, webRole string) (in
 	if err != nil {
 		return 0, err
 	}
+	cmdJSON, err := marshalDiscordCommands(discordCommands)
+	if err != nil {
+		return 0, err
+	}
 	var id int64
 	err = s.DB.QueryRowContext(ctx, `
-		INSERT INTO account_groups (name, description, web_role) VALUES ($1,$2,$3) RETURNING id
-	`, name, desc, webRole).Scan(&id)
+		INSERT INTO account_groups (name, description, web_role, discord_commands) VALUES ($1,$2,$3,$4::jsonb) RETURNING id
+	`, name, desc, webRole, cmdJSON).Scan(&id)
 	return id, err
 }
 
@@ -384,14 +388,15 @@ type GroupUser struct {
 }
 
 type GroupDetail struct {
-	ID          int64       `json:"id"`
-	Name        string      `json:"name"`
-	Description string      `json:"description"`
-	WebRole     string      `json:"web_role"` // "", "admin", or "readonly"
-	Users       []GroupUser `json:"users"`
-	UserIDs     []int64     `json:"user_ids"` // legacy / Discord bot
-	RoleIDs     []string    `json:"role_ids"`
-	AccountIDs  []int64     `json:"account_ids"`
+	ID               int64       `json:"id"`
+	Name             string      `json:"name"`
+	Description      string      `json:"description"`
+	WebRole          string      `json:"web_role"` // "", "admin", or "readonly"
+	DiscordCommands  []string    `json:"discord_commands"`
+	Users            []GroupUser `json:"users"`
+	UserIDs          []int64     `json:"user_ids"` // legacy / Discord bot
+	RoleIDs          []string    `json:"role_ids"`
+	AccountIDs       []int64     `json:"account_ids"`
 }
 
 func (s *Store) ListGroups(ctx context.Context) ([]map[string]any, error) {
@@ -403,6 +408,7 @@ func (s *Store) ListGroups(ctx context.Context) ([]map[string]any, error) {
 	for _, g := range details {
 		out = append(out, map[string]any{
 			"id": g.ID, "name": g.Name, "description": g.Description, "web_role": g.WebRole,
+			"discord_commands": g.DiscordCommands,
 		})
 	}
 	return out, nil
@@ -411,7 +417,7 @@ func (s *Store) ListGroups(ctx context.Context) ([]map[string]any, error) {
 // ListGroupDetails returns groups with member users/roles and linked EQ accounts.
 func (s *Store) ListGroupDetails(ctx context.Context) ([]GroupDetail, error) {
 	rows, err := s.DB.QueryContext(ctx, `
-		SELECT id, name, description, COALESCE(web_role, '')
+		SELECT id, name, description, COALESCE(web_role, ''), COALESCE(discord_commands, '[]'::jsonb)
 		FROM account_groups ORDER BY lower(name), id
 	`)
 	if err != nil {
@@ -421,7 +427,12 @@ func (s *Store) ListGroupDetails(ctx context.Context) ([]GroupDetail, error) {
 	var out []GroupDetail
 	for rows.Next() {
 		var g GroupDetail
-		if err := rows.Scan(&g.ID, &g.Name, &g.Description, &g.WebRole); err != nil {
+		var cmdRaw []byte
+		if err := rows.Scan(&g.ID, &g.Name, &g.Description, &g.WebRole, &cmdRaw); err != nil {
+			return nil, err
+		}
+		g.DiscordCommands, err = parseDiscordCommandsJSON(cmdRaw)
+		if err != nil {
 			return nil, err
 		}
 		g.UserIDs = []int64{}
@@ -580,8 +591,8 @@ func (s *Store) UnlinkAccountGroup(ctx context.Context, accountID, groupID int64
 	return err
 }
 
-// UpdateGroupMeta updates name/description/web_role for a group.
-func (s *Store) UpdateGroupMeta(ctx context.Context, groupID int64, name, description, webRole string) error {
+// UpdateGroupMeta updates name/description/web_role/discord_commands for a group.
+func (s *Store) UpdateGroupMeta(ctx context.Context, groupID int64, name, description, webRole string, discordCommands []string) error {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return fmt.Errorf("name required")
@@ -590,9 +601,13 @@ func (s *Store) UpdateGroupMeta(ctx context.Context, groupID int64, name, descri
 	if err != nil {
 		return err
 	}
+	cmdJSON, err := marshalDiscordCommands(discordCommands)
+	if err != nil {
+		return err
+	}
 	res, err := s.DB.ExecContext(ctx, `
-		UPDATE account_groups SET name=$2, description=$3, web_role=$4 WHERE id=$1
-	`, groupID, name, strings.TrimSpace(description), webRole)
+		UPDATE account_groups SET name=$2, description=$3, web_role=$4, discord_commands=$5::jsonb WHERE id=$1
+	`, groupID, name, strings.TrimSpace(description), webRole, cmdJSON)
 	if err != nil {
 		return err
 	}

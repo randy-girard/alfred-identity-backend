@@ -526,15 +526,16 @@ func (s *Server) handleGroups(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	u := currentUser(r)
 	var body struct {
-		Name        string `json:"name"`
-		Description string `json:"description"`
-		WebRole     string `json:"web_role"`
+		Name            string   `json:"name"`
+		Description     string   `json:"description"`
+		WebRole         string   `json:"web_role"`
+		DiscordCommands []string `json:"discord_commands"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad_request")
 		return
 	}
-	id, err := s.store.CreateGroup(ctx, body.Name, body.Description, body.WebRole)
+	id, err := s.store.CreateGroup(ctx, body.Name, body.Description, body.WebRole, body.DiscordCommands)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
@@ -582,12 +583,13 @@ func (s *Server) handleGroupSub(w http.ResponseWriter, r *http.Request) {
 			return
 		case http.MethodPatch:
 			var body struct {
-				Name        *string   `json:"name"`
-				Description *string   `json:"description"`
-				WebRole     *string   `json:"web_role"`
-				UserIDs     *[]int64  `json:"user_ids"`
-				RoleIDs     *[]string `json:"role_ids"`
-				AccountIDs  *[]int64  `json:"account_ids"`
+				Name            *string   `json:"name"`
+				Description     *string   `json:"description"`
+				WebRole         *string   `json:"web_role"`
+				DiscordCommands *[]string `json:"discord_commands"`
+				UserIDs         *[]int64  `json:"user_ids"`
+				RoleIDs         *[]string `json:"role_ids"`
+				AccountIDs      *[]int64  `json:"account_ids"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				writeErr(w, http.StatusBadRequest, "bad_request")
@@ -610,8 +612,9 @@ func (s *Server) handleGroupSub(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			changed := false
-			if body.Name != nil || body.Description != nil || body.WebRole != nil {
+			if body.Name != nil || body.Description != nil || body.WebRole != nil || body.DiscordCommands != nil {
 				name, desc, webRole := cur.Name, cur.Description, cur.WebRole
+				discordCommands := cur.DiscordCommands
 				if body.Name != nil {
 					name = *body.Name
 				}
@@ -621,7 +624,10 @@ func (s *Server) handleGroupSub(w http.ResponseWriter, r *http.Request) {
 				if body.WebRole != nil {
 					webRole = *body.WebRole
 				}
-				if err := s.store.UpdateGroupMeta(ctx, groupID, name, desc, webRole); err != nil {
+				if body.DiscordCommands != nil {
+					discordCommands = *body.DiscordCommands
+				}
+				if err := s.store.UpdateGroupMeta(ctx, groupID, name, desc, webRole, discordCommands); err != nil {
 					writeErr(w, http.StatusBadRequest, err.Error())
 					return
 				}

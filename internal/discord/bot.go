@@ -274,7 +274,7 @@ func commandDefs(prefix string) []*discordgo.ApplicationCommand {
 			Name:        prefix + "sso",
 			Description: "SSO API tokens",
 			Options: []*discordgo.ApplicationCommandOption{
-				{Type: discordgo.ApplicationCommandOptionSubCommand, Name: "get", Description: "Get or create your SSO token and Alfred Identity source JSON"},
+				{Type: discordgo.ApplicationCommandOptionSubCommand, Name: "get", Description: "Get or create your SSO token and " + web.DesktopAppName + " source JSON"},
 				{Type: discordgo.ApplicationCommandOptionSubCommand, Name: "revoke", Description: "Revoke your SSO token",
 					Options: []*discordgo.ApplicationCommandOption{
 						{Type: discordgo.ApplicationCommandOptionInteger, Name: "id", Description: "Token id (optional; defaults to your active token)", Required: false},
@@ -312,6 +312,23 @@ func (b *Bot) onInteraction(s *discordgo.Session, i *discordgo.InteractionCreate
 		b.Log.Error("upsert user", "err", err, "discord_id", uid)
 		b.respondErr(s, i, "Database error while loading your user.")
 		return
+	}
+
+	cmdKey := strings.TrimPrefix(data.Name, b.Cfg.DiscordCommandPrefix)
+	if !b.userIsDiscordAdmin(u) {
+		allowed, err := b.Store.UserCanUseDiscordCommand(ctx, u, cmdKey)
+		if err != nil {
+			b.Log.Error("discord command access", "err", err, "command", cmdKey, "user_id", u.ID)
+			b.respondErr(s, i, "Could not verify command access.")
+			return
+		}
+		if !allowed {
+			b.respondErr(s, i, fmt.Sprintf(
+				"You don't have permission to use %s.\n\nAsk a guild admin to add you to a group with Discord slash command access.",
+				b.slash(cmdKey),
+			))
+			return
+		}
 	}
 
 	switch data.Name {
@@ -355,6 +372,22 @@ func interactionIdentity(i *discordgo.InteractionCreate) (id, name string, roles
 		return i.User.ID, i.User.Username, nil
 	}
 	return "", "", nil
+}
+
+func (b *Bot) userIsDiscordAdmin(u store.User) bool {
+	for _, id := range b.Cfg.DiscordBootstrapAdmins {
+		if u.DiscordID == id {
+			return true
+		}
+	}
+	if b.Cfg.DiscordAdminRoleID != "" {
+		for _, r := range u.RoleIDs {
+			if r == b.Cfg.DiscordAdminRoleID {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (b *Bot) handleSSO(ctx context.Context, s *discordgo.Session, i *discordgo.InteractionCreate, u store.User, data discordgo.ApplicationCommandInteractionData) {
@@ -418,9 +451,9 @@ func (b *Bot) handleSSO(ctx context.Context, s *discordgo.Session, i *discordgo.
 		name := web.SourceNameFromConfig(b.Cfg)
 		host := web.SourceHostFromConfig(b.Cfg)
 		jsonSnippet := web.BuildSourceImportJSON(name, host, secret, "")
-		desc := "Keep this private. Paste the JSON into Alfred Identity → Connections → Add from JSON."
+		desc := "Keep this private. Paste the JSON into " + web.DesktopAppName + " → Connections → Add from JSON."
 		if created {
-			desc = "New SSO token created (one per Discord user). Paste the JSON into Alfred Identity → Connections → Add from JSON."
+			desc = "New SSO token created (one per Discord user). Paste the JSON into " + web.DesktopAppName + " → Connections → Add from JSON."
 		}
 		b.respondEmbed(s, i, &discordgo.MessageEmbed{
 			Title:       "Your SSO token",
@@ -428,7 +461,7 @@ func (b *Bot) handleSSO(ctx context.Context, s *discordgo.Session, i *discordgo.
 			Color:       colorOK,
 			Fields: []*discordgo.MessageEmbedField{
 				{Name: "Secret", Value: fmt.Sprintf("```\n%s\n```", secret), Inline: false},
-				{Name: "Alfred Identity source", Value: fmt.Sprintf("```json\n%s\n```", jsonSnippet), Inline: false},
+				{Name: web.DesktopAppName + " source", Value: fmt.Sprintf("```json\n%s\n```", jsonSnippet), Inline: false},
 			},
 		})
 	}
