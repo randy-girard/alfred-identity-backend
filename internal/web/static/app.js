@@ -1396,18 +1396,6 @@ function renderSettings() {
       ${admin ? '' : '<p class="banner err">Read-only access — configuration backup requires admin.</p>'}
 
       <div class="settings-block">
-        <h3>GUI source URL</h3>
-        <p class="hint">
-          Share this public link so guild members can add this daemon in the Alfred Identity app
-          (Connections → Add from URL). No login required; tokens are not included.
-        </p>
-        <div class="row">
-          <code id="sso-source-url" class="mono" style="flex:1;word-break:break-all"></code>
-          <button type="button" class="secondary" id="copy-sso-source">Copy URL</button>
-        </div>
-      </div>
-
-      <div class="settings-block">
         <h3>Export configuration</h3>
         <p class="hint">Download a portable backup. Use this on the source host before migrating.</p>
         <button type="button" class="secondary" id="export-config" ${admin ? '' : 'disabled'}>Download backup JSON</button>
@@ -1430,17 +1418,6 @@ function renderSettings() {
 }
 
 function bindSettings(root) {
-  const sourceURL = `${location.origin}/sso-source.json`
-  const urlEl = root.querySelector('#sso-source-url')
-  if (urlEl) urlEl.textContent = sourceURL
-  root.querySelector('#copy-sso-source')?.addEventListener('click', async () => {
-    try {
-      await navigator.clipboard.writeText(sourceURL)
-      showError('')
-    } catch (_) {
-      showError('Could not copy URL')
-    }
-  })
   root.querySelector('#export-config')?.addEventListener('click', () => {
     if (!isWebAdmin()) return
     run(async () => {
