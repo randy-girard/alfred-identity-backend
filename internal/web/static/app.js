@@ -10,6 +10,32 @@ const TABS = [
   { id: 'settings', label: 'Settings' },
 ]
 
+const TAB_IDS = new Set(TABS.map((t) => t.id))
+
+function tabFromLocation() {
+  const raw = (location.pathname || '').replace(/^\/admin\/?/, '').replace(/\/+$/, '')
+  if (!raw || raw === 'index.html') return 'overview'
+  const id = raw.split('/')[0]
+  return TAB_IDS.has(id) ? id : 'overview'
+}
+
+function pathForTab(id) {
+  if (!id || id === 'overview') return '/admin/'
+  return `/admin/${id}`
+}
+
+/** Keep the address bar in sync so a reload stays on the current tab. */
+function syncTabToURL(replace) {
+  const want = pathForTab(tab)
+  const cur = location.pathname || ''
+  const same = cur === want
+    || (want === '/admin/' && (cur === '/admin' || cur === '/admin/'))
+  if (same) return
+  const url = want + (location.search || '')
+  if (replace) history.replaceState({ tab }, '', url)
+  else history.pushState({ tab }, '', url)
+}
+
 const THEME_KEY = 'alfred-identity-theme'
 
 function readStoredTheme() {
@@ -44,7 +70,7 @@ function toggleTheme() {
 
 let state = { accounts: [], shares: [], users: [], roles: [], groups: [], sessions: [], connections: [], online: [] }
 let me = null
-let tab = 'overview'
+let tab = tabFromLocation()
 let busy = false
 let ws = null
 let connDurationTimer = null
@@ -281,14 +307,27 @@ function renderTabs() {
     <button type="button" class="tab ${tab === t.id ? 'active' : ''}" data-tab="${t.id}">${esc(t.label)}</button>
   `).join('')
   $('#tabs').querySelectorAll('[data-tab]').forEach((btn) => {
-    btn.onclick = () => { tab = btn.dataset.tab; render() }
+    btn.onclick = () => goTab(btn.dataset.tab)
   })
 }
 
 function goTab(id) {
+  if (!TAB_IDS.has(id)) id = 'overview'
+  if (tab === id) {
+    syncTabToURL(true)
+    return
+  }
   tab = id
+  syncTabToURL(false)
   render()
 }
+
+window.addEventListener('popstate', () => {
+  const next = tabFromLocation()
+  if (next === tab) return
+  tab = next
+  render()
+})
 
 function sortRows(rows, tableId, getters) {
   const cfg = tableSort[tableId] || { key: '', dir: 1 }
@@ -2329,6 +2368,7 @@ async function boot() {
   await refreshState(true)
   await loadMetrics({ updateOverview: false })
   connectLive()
+  syncTabToURL(true)
   render()
 }
 
