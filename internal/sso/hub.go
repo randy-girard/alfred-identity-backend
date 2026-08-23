@@ -821,11 +821,17 @@ func (h *Hub) IsAdmin(u store.User) bool {
 
 // BroadcastFullState pushes ACL-filtered state to all SSO clients and notifies listeners.
 func (h *Hub) BroadcastFullState() {
+	if h == nil {
+		return
+	}
 	h.broadcastFullState()
 }
 
 // DisconnectUser closes WS sessions for a user (e.g. after access revoke).
 func (h *Hub) DisconnectUser(userID int64, reason string) {
+	if h == nil {
+		return
+	}
 	h.disconnectUser(userID, reason)
 }
 
