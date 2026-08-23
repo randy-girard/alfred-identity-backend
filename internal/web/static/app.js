@@ -73,6 +73,8 @@ let me = null
 let tab = tabFromLocation()
 let busy = false
 let ws = null
+let wsReconnectTimer = null
+let wsReconnectAttempt = 0
 let connDurationTimer = null
 let metricsRefreshTimer = null
 let liveConnected = false
@@ -253,21 +255,34 @@ function applyState(data, skipRender) {
 }
 
 function connectLive() {
+  if (wsReconnectTimer) {
+    clearTimeout(wsReconnectTimer)
+    wsReconnectTimer = null
+  }
+  if (ws) {
+    try { ws.onclose = null; ws.close() } catch (_) {}
+    ws = null
+  }
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
   ws = new WebSocket(`${proto}://${location.host}/admin/ws`)
   const status = $('#live-status')
   ws.onopen = () => {
     liveConnected = true
-    status.textContent = 'Live · connected'
-    status.className = 'ok'
+    wsReconnectAttempt = 0
+    if (status) {
+      status.textContent = 'Live · connected'
+      status.className = 'ok'
+    }
     if (tab === 'overview') refreshOverviewLive()
   }
   ws.onclose = () => {
     liveConnected = false
-    status.textContent = 'Live · disconnected (retrying…)'
-    status.className = 'bad'
+    if (status) {
+      status.textContent = 'Live · disconnected (retrying…)'
+      status.className = 'bad'
+    }
     if (tab === 'overview') refreshOverviewLive()
-    setTimeout(connectLive, 2500)
+    scheduleLiveReconnect()
   }
   ws.onerror = () => {}
   ws.onmessage = (ev) => {
@@ -276,6 +291,31 @@ function connectLive() {
       if (msg.type === 'state') applyState(msg)
     } catch (_) {}
   }
+}
+
+/** Reconnect with backoff; stop if the session cookie is gone (avoids 401 log spam). */
+function scheduleLiveReconnect() {
+  if (wsReconnectTimer) return
+  const attempt = wsReconnectAttempt++
+  const delay = Math.min(30000, 2500 * Math.pow(1.6, Math.min(attempt, 8)))
+  wsReconnectTimer = setTimeout(async () => {
+    wsReconnectTimer = null
+    const status = $('#live-status')
+    try {
+      await api('/admin/api/me')
+    } catch (e) {
+      const msg = String(e.message || e)
+      if (status) {
+        status.textContent = 'Live · signed out'
+        status.className = 'bad'
+      }
+      if (msg.includes('unauthorized') || msg.includes('forbidden')) {
+        window.location.href = '/admin/login'
+      }
+      return
+    }
+    connectLive()
+  }, delay)
 }
 
 function closeModal() {

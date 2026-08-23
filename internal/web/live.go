@@ -84,10 +84,22 @@ func (s *Server) broadcastLiveState() {
 	if len(conns) == 0 {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+
+	// Group tabs by user so we build filtered state once per user, not once per
+	// socket. A shared deadline across all builds (previous behavior after
+	// per-user filtering) could starve later writes and drop live sockets.
+	byUser := map[int64][]*websocket.Conn{}
+	users := map[int64]store.User{}
 	for c, u := range conns {
-		st, err := s.buildState(ctx, u)
+		byUser[u.ID] = append(byUser[u.ID], c)
+		users[u.ID] = u
+	}
+
+	for uid, sockets := range byUser {
+		u := users[uid]
+		stCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		st, err := s.buildState(stCtx, u)
+		cancel()
 		if err != nil {
 			continue
 		}
@@ -96,13 +108,15 @@ func (s *Server) broadcastLiveState() {
 		if err != nil {
 			continue
 		}
-		wctx, c2 := context.WithTimeout(ctx, 3*time.Second)
-		if err := c.Write(wctx, websocket.MessageText, msg); err != nil {
-			s.liveMu.Lock()
-			delete(s.live, c)
-			s.liveMu.Unlock()
-			_ = c.Close(websocket.StatusGoingAway, "write failed")
+		for _, c := range sockets {
+			wctx, c2 := context.WithTimeout(context.Background(), 5*time.Second)
+			if err := c.Write(wctx, websocket.MessageText, msg); err != nil {
+				s.liveMu.Lock()
+				delete(s.live, c)
+				s.liveMu.Unlock()
+				_ = c.Close(websocket.StatusGoingAway, "write failed")
+			}
+			c2()
 		}
-		c2()
 	}
 }

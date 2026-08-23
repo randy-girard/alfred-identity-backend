@@ -53,13 +53,21 @@ func RequestLog(log *slog.Logger, next http.Handler) http.Handler {
 		sw := &statusWriter{ResponseWriter: w, code: 200}
 		next.ServeHTTP(sw, r)
 		// After a successful WebSocket hijack, further writes may be invalid; still log.
-		log.Info("http",
+		attrs := []any{
 			"method", r.Method,
 			"path", r.URL.Path,
 			"status", sw.code,
 			"remote", r.RemoteAddr,
-			"upgrade", r.Header.Get("Upgrade"),
 			"duration_ms", time.Since(start).Milliseconds(),
-		)
+		}
+		if up := r.Header.Get("Upgrade"); up != "" {
+			attrs = append(attrs, "upgrade", up)
+		}
+		// Unauthenticated live WS probes / expired tabs retry often; keep INFO clean.
+		if sw.code == http.StatusUnauthorized && r.URL.Path == "/admin/ws" {
+			log.Debug("http", attrs...)
+			return
+		}
+		log.Info("http", attrs...)
 	})
 }
