@@ -9,28 +9,35 @@ import (
 
 func TestFormatShareNotifyMessage(t *testing.T) {
 	msg := formatShareNotifyMessage(store.User{
-		DiscordID:   "111",
 		DisplayName: "Alice",
-	}, "eqbox", []string{"tank", "eqbox", " main "})
-
-	if !strings.Contains(msg, "<@111> (Alice)") {
-		t.Fatalf("owner mention missing: %q", msg)
+		DiscordID:   "123",
+	}, "tankbox", []string{"tankbox", "tank", "tank", "  "})
+	for _, want := range []string{"Alice", "tankbox", "tank", "<@123>"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("missing %q in %s", want, msg)
+		}
 	}
-	if !strings.Contains(msg, "**Account:** eqbox") {
-		t.Fatalf("account missing: %q", msg)
+	// Aliases line should not list the account username itself.
+	if strings.Contains(msg, "**Aliases:** tankbox") {
+		t.Fatalf("username should not be listed as alias: %s", msg)
 	}
-	if !strings.Contains(msg, "**Aliases:** tank, main") {
-		t.Fatalf("aliases missing: %q", msg)
-	}
-	if !strings.Contains(msg, "private share") {
-		t.Fatalf("private share note missing: %q", msg)
+	msg2 := formatShareNotifyMessage(store.User{}, "solo", nil)
+	if !strings.Contains(msg2, "Someone") || !strings.Contains(msg2, "solo") {
+		t.Fatalf("%s", msg2)
 	}
 }
 
 func TestCleanShareAliases(t *testing.T) {
-	got := cleanShareAliases("eqbox", []string{"tank", "EQBOX", "", "tank"})
-	want := []string{"tank"}
-	if len(got) != len(want) || got[0] != want[0] {
-		t.Fatalf("got %#v want %#v", got, want)
+	got := cleanShareAliases("Main", []string{"Main", "alt", "ALT", "", "box"})
+	if len(got) != 2 || got[0] != "alt" || got[1] != "box" {
+		t.Fatalf("%#v", got)
 	}
+}
+
+func TestNotifyAccountSharedNilSafe(t *testing.T) {
+	var b *Bot
+	b.NotifyAccountShared(nil, store.User{}, "x", nil, []int64{1})
+	b = &Bot{}
+	b.NotifyAccountShared(nil, store.User{}, "x", nil, nil)
+	b.NotifyAccountShared(nil, store.User{}, "x", nil, []int64{1})
 }

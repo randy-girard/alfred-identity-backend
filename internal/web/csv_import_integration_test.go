@@ -29,8 +29,11 @@ func TestImportSSOAccountsCSV(t *testing.T) {
 
 	uname := "csvacct_" + testRandHex(4)
 	charName := "Hero" + testRandHex(2)
+	alias1 := "csva_" + testRandHex(3)
+	alias2 := "csvb_" + testRandHex(3)
+	tag := "csvt_" + testRandHex(3)
 	csvIn := "username,password,role,aliases,tags,characters\n" +
-		uname + `,secret,Raider,tank|box,raid,` + charName + "\n"
+		uname + `,secret,Raider,` + alias1 + `|` + alias2 + `,` + tag + `,` + charName + "\n"
 	res, err := s.importSSOAccountsCSV(ctx, actor, strings.NewReader(csvIn))
 	if err != nil {
 		t.Fatal(err)
