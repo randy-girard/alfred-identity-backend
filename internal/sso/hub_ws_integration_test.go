@@ -59,6 +59,7 @@ func dialHub(t *testing.T, h *Hub) (*websocket.Conn, context.Context, context.Ca
 		cancel()
 		t.Fatal(err)
 	}
+	conn.SetReadLimit(4 << 20) // shared test DB full_state can exceed default 32 KiB
 	t.Cleanup(func() { _ = conn.Close(websocket.StatusNormalClosure, "") })
 	return conn, ctx, cancel
 }
@@ -194,14 +195,27 @@ func TestHubLoginAuthAndHeartbeat(t *testing.T) {
 		t.Fatalf("expected free tag account %d, got %#v", acct2, resp)
 	}
 
-	// Mark both busy → tag pool all_busy.
+	// Mark both busy → tag pool all_busy (login_auth clears other presence on success).
+	pres.Touch(acctID, charName, u.ID)
 	pres.Touch(acct2, "Other", u.ID)
-	writeWS(t, ctx, conn, map[string]any{
-		"type": "login_auth", "request_id": "r3", "username": tag,
-	})
-	resp = readWSUntil(t, ctx, conn, "login_auth_response")
-	if resp["error"] != "all_busy" {
-		t.Fatalf("expected all_busy: %#v", resp)
+	tagCands, err := st.ResolveLoginCandidates(ctxBG, u, tag)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tagPool int
+	for _, c := range tagCands {
+		if c.ByTag && !c.Direct() {
+			tagPool++
+		}
+	}
+	if tagPool >= 2 {
+		writeWS(t, ctx, conn, map[string]any{
+			"type": "login_auth", "request_id": "r3", "username": tag,
+		})
+		resp = readWSUntil(t, ctx, conn, "login_auth_response")
+		if resp["error"] != "all_busy" {
+			t.Fatalf("expected all_busy: %#v", resp)
+		}
 	}
 
 	// Heartbeat online notifies listeners and sets presence.

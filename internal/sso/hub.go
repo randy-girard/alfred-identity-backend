@@ -197,6 +197,9 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				})
 				continue
 			}
+			if h.Presence != nil {
+				h.Presence.ClearUserExcept(user.ID, chosen)
+			}
 			_ = writeJSON(ctx, c, client, map[string]any{
 				"type": "login_auth_response", "request_id": msg.RequestID,
 				"real_user": realUser, "encrypted_credentials": base64.StdEncoding.EncodeToString(blob),
@@ -241,6 +244,7 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if msg.Offline {
 				h.Presence.Clear(acctID)
 			} else {
+				h.Presence.ClearUserExcept(user.ID, acctID)
 				h.Presence.Touch(acctID, msg.CharacterName, user.ID)
 			}
 			h.notifyStateListeners()

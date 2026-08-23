@@ -42,6 +42,22 @@ func (t *Tracker) Clear(accountID int64) {
 	delete(t.m, accountID)
 }
 
+// ClearUserExcept removes all presence rows for userID except keepAccountID.
+// Used when a user switches character (single-box): only one account may be online per user.
+func (t *Tracker) ClearUserExcept(userID, keepAccountID int64) int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.expireLocked()
+	cleared := 0
+	for id, e := range t.m {
+		if e.UserID == userID && id != keepAccountID {
+			delete(t.m, id)
+			cleared++
+		}
+	}
+	return cleared
+}
+
 func (t *Tracker) IsBusy(accountID int64) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()

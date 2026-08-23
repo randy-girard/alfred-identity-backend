@@ -38,6 +38,26 @@ func TestTouchBusyExpireClear(t *testing.T) {
 	}
 }
 
+func TestClearUserExcept(t *testing.T) {
+	tr := New(time.Minute)
+	tr.Touch(1, "Hero", 42)
+	tr.Touch(2, "Alt", 42)
+	tr.Touch(3, "Other", 99)
+
+	if n := tr.ClearUserExcept(42, 2); n != 1 {
+		t.Fatalf("cleared=%d want 1", n)
+	}
+	if tr.IsBusy(1) {
+		t.Fatal("account 1 should be cleared")
+	}
+	if !tr.IsBusy(2) {
+		t.Fatal("account 2 should remain")
+	}
+	if !tr.IsBusy(3) {
+		t.Fatal("other user account 3 should remain")
+	}
+}
+
 func TestSnapshotSorted(t *testing.T) {
 	tr := New(time.Minute)
 	tr.Touch(30, "c", 1)
