@@ -7,7 +7,10 @@ import (
 	"github.com/alfred-identity/web/internal/store"
 )
 
-// webVisibleAccounts returns non-restricted SSO accounts plus restricted shares the user may use.
+// webVisibleAccounts returns SSO accounts the viewer may see on the Accounts tab.
+// Non-restricted accounts with no role/user/group grants are visible to every web user with SSO access;
+// restricted private shares follow AllowedAccountIDs (owner and share recipients only).
+// Web admins also see non-restricted accounts they do not personally have SSO access to, for management.
 func (s *Server) webVisibleAccounts(ctx context.Context, u store.User) ([]store.EQAccountMeta, error) {
 	all, err := s.store.ListEQAccountMetas(ctx, nil, true)
 	if err != nil {
@@ -21,20 +24,23 @@ func (s *Server) webVisibleAccounts(ctx context.Context, u store.User) ([]store.
 	for _, id := range allowed {
 		allowedSet[id] = struct{}{}
 	}
+	admin := s.isWebAdmin(ctx, u)
 	out := make([]store.EQAccountMeta, 0, len(all))
 	for _, a := range all {
-		if !a.Restricted {
+		_, hasAccess := allowedSet[a.ID]
+		switch {
+		case a.Restricted:
+			if !hasAccess {
+				continue
+			}
+			meta, err := s.store.LoadEQAccountMetaForViewer(ctx, a.ID, u)
+			if err != nil {
+				continue
+			}
+			out = append(out, meta)
+		case hasAccess || admin:
 			out = append(out, a)
-			continue
 		}
-		if _, ok := allowedSet[a.ID]; !ok {
-			continue
-		}
-		meta, err := s.store.LoadEQAccountMetaForViewer(ctx, a.ID, u)
-		if err != nil {
-			continue
-		}
-		out = append(out, meta)
 	}
 	return out, nil
 }
@@ -72,8 +78,8 @@ func (s *Server) webVisibleShares(ctx context.Context, u store.User) ([]store.EQ
 }
 
 // rejectRestrictedAccountManage blocks web mutations on private shares unless the actor owns the share.
-// When setAccess is true, restricted accounts always reject (share grants are managed in the desktop GUI).
-func (s *Server) rejectRestrictedAccountManage(w http.ResponseWriter, ctx context.Context, accountID int64, u store.User, setAccess bool) bool {
+// Access grants and passwords on restricted accounts are always rejected (managed in the desktop GUI).
+func (s *Server) rejectRestrictedAccountManage(w http.ResponseWriter, ctx context.Context, accountID int64, u store.User, setAccess, setPassword bool) bool {
 	meta, err := s.store.LoadEQAccountMeta(ctx, accountID)
 	if err != nil {
 		writeErr(w, http.StatusNotFound, "not_found")
@@ -84,6 +90,10 @@ func (s *Server) rejectRestrictedAccountManage(w http.ResponseWriter, ctx contex
 	}
 	if setAccess {
 		writeErr(w, http.StatusForbidden, "share_access_managed_in_gui")
+		return true
+	}
+	if setPassword {
+		writeErr(w, http.StatusForbidden, "share_password_managed_in_gui")
 		return true
 	}
 	if meta.OwnerUserID != u.ID {

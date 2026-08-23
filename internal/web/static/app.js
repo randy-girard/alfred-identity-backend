@@ -1183,11 +1183,13 @@ function renderAccountModalBody() {
     ${isEdit ? `<p class="hint">Editing <strong class="mono">${esc(f.username || '#' + f.id)}</strong></p>` : `
       <div><label>Account name</label><input id="m-user" value="${esc(f.username)}" autocomplete="off" autocapitalize="off"/></div>
     `}
-    <div><label>${isEdit ? 'New password' : 'Password'}</label>
-      <input id="m-pass" type="password" value="" placeholder="${isEdit ? 'Leave blank to keep' : ''}" autocomplete="off"/>
-    </div>
     ${accountForm.restricted
-    ? '<p class="hint form-span">Access for this private share (users, roles, groups) is managed in the desktop GUI (<strong>Local → Share</strong>).</p>'
+    ? '<p class="hint form-span">Password and access for this private share (users, roles, groups) are managed in the desktop GUI (<strong>Local → Share</strong>).</p>'
+    : `<div><label>${isEdit ? 'New password' : 'Password'}</label>
+      <input id="m-pass" type="password" value="" placeholder="${isEdit ? 'Leave blank to keep' : ''}" autocomplete="off"/>
+    </div>`}
+    ${accountForm.restricted
+    ? ''
     : accessFieldsHTML({
       required_role_ids: f.required_role_ids,
       required_user_ids: f.required_user_ids,
@@ -1340,7 +1342,7 @@ function openAccountModal(account) {
   root.querySelector('[data-save]').addEventListener('click', () => run(async () => {
     const access = accountForm.restricted ? {} : readAccessFields(root)
     if (accountForm.id) {
-      const password = root.querySelector('#m-pass').value
+      const password = accountForm.restricted ? '' : root.querySelector('#m-pass')?.value
       const disabled = !!root.querySelector('#m-dis')?.checked
       const body = { disabled, ...access }
       if (password) body.password = password

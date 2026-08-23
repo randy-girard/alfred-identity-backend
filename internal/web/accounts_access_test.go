@@ -36,6 +36,19 @@ func TestWebRestrictedShareAccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	openName := "webopen_" + testRandHex(6)
+	openID, err := st.AddEQAccount(ctx, openName, "open-pass", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	limitedName := "weblimited_" + testRandHex(6)
+	limitedID, err := st.AddEQAccount(ctx, limitedName, "lim-pass", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetAccountAccess(ctx, limitedID, nil, []int64{friend.ID}, nil); err != nil {
+		t.Fatal(err)
+	}
 
 	s := New(Options{
 		Store:             st,
@@ -52,6 +65,7 @@ func TestWebRestrictedShareAccess(t *testing.T) {
 	}
 
 	// Stranger (admin) state: sees share on shares tab but not on accounts (no SSO access).
+	// Open account (no grants) is visible; limited account is not (no user grant).
 	rr := httptest.NewRecorder()
 	s.handleState(rr, reqWithUser(http.MethodGet, BasePath+"/api/state", stranger, nil))
 	if rr.Code != http.StatusOK {
@@ -61,26 +75,40 @@ func TestWebRestrictedShareAccess(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &stBody); err != nil {
 		t.Fatal(err)
 	}
+	accountIDs := map[int64]bool{}
 	for _, a := range stBody["accounts"].([]any) {
 		m := a.(map[string]any)
-		if int64(m["id"].(float64)) == shareID {
-			t.Fatal("stranger should not see restricted share on accounts without access")
-		}
+		accountIDs[int64(m["id"].(float64))] = true
+	}
+	if accountIDs[shareID] {
+		t.Fatal("stranger should not see restricted share on accounts without access")
+	}
+	if !accountIDs[openID] {
+		t.Fatal("stranger should see open account with no grants")
+	}
+	if !accountIDs[limitedID] {
+		t.Fatal("stranger admin should see limited account for web management")
 	}
 	shares := stBody["shares"].([]any)
 	if len(shares) != 1 {
 		t.Fatalf("admin shares count=%d want 1", len(shares))
 	}
 
-	// Friend sees share on accounts but cannot PATCH.
+	// Friend sees share on accounts but cannot PATCH access grants.
 	rr = httptest.NewRecorder()
 	patchBody, _ := json.Marshal(map[string]any{"required_user_ids": []int64{friend.ID}})
 	s.handleAccountSub(rr, reqWithUser(http.MethodPatch, BasePath+"/api/accounts/"+strconv.FormatInt(shareID, 10), friend, patchBody))
+	if rr.Code != http.StatusForbidden || !strings.Contains(rr.Body.String(), "share_access_managed_in_gui") {
+		t.Fatalf("friend access patch: %d %s", rr.Code, rr.Body.String())
+	}
+	rr = httptest.NewRecorder()
+	patchBody, _ = json.Marshal(map[string]any{"disabled": true})
+	s.handleAccountSub(rr, reqWithUser(http.MethodPatch, BasePath+"/api/accounts/"+strconv.FormatInt(shareID, 10), friend, patchBody))
 	if rr.Code != http.StatusForbidden || !strings.Contains(rr.Body.String(), "share_not_owner") {
-		t.Fatalf("friend patch: %d %s", rr.Code, rr.Body.String())
+		t.Fatalf("friend disabled patch: %d %s", rr.Code, rr.Body.String())
 	}
 
-	// Owner can PATCH password but not access grants.
+	// Owner cannot PATCH access grants or password on web (desktop GUI only).
 	rr = httptest.NewRecorder()
 	patchBody, _ = json.Marshal(map[string]any{"required_user_ids": []int64{friend.ID}})
 	s.handleAccountSub(rr, reqWithUser(http.MethodPatch, BasePath+"/api/accounts/"+strconv.FormatInt(shareID, 10), owner, patchBody))
@@ -90,25 +118,35 @@ func TestWebRestrictedShareAccess(t *testing.T) {
 	rr = httptest.NewRecorder()
 	patchBody, _ = json.Marshal(map[string]any{"password": "new-pass"})
 	s.handleAccountSub(rr, reqWithUser(http.MethodPatch, BasePath+"/api/accounts/"+strconv.FormatInt(shareID, 10), owner, patchBody))
-	if rr.Code != http.StatusOK {
+	if rr.Code != http.StatusForbidden || !strings.Contains(rr.Body.String(), "share_password_managed_in_gui") {
 		t.Fatalf("owner password patch: %d %s", rr.Code, rr.Body.String())
 	}
+	rr = httptest.NewRecorder()
+	patchBody, _ = json.Marshal(map[string]any{"password": "new-pass"})
+	s.handleAccountSub(rr, reqWithUser(http.MethodPatch, BasePath+"/api/accounts/"+strconv.FormatInt(shareID, 10), friend, patchBody))
+	if rr.Code != http.StatusForbidden || !strings.Contains(rr.Body.String(), "share_password_managed_in_gui") {
+		t.Fatalf("friend password patch: %d %s", rr.Code, rr.Body.String())
+	}
 
-	// Friend state includes share on accounts.
+	// Friend state includes share and limited account; open account visible to all SSO users.
 	rr = httptest.NewRecorder()
 	s.handleState(rr, reqWithUser(http.MethodGet, BasePath+"/api/state", friend, nil))
 	if err := json.Unmarshal(rr.Body.Bytes(), &stBody); err != nil {
 		t.Fatal(err)
 	}
-	found := false
+	accountIDs = map[int64]bool{}
 	for _, a := range stBody["accounts"].([]any) {
 		m := a.(map[string]any)
-		if int64(m["id"].(float64)) == shareID {
-			found = true
-		}
+		accountIDs[int64(m["id"].(float64))] = true
 	}
-	if !found {
+	if !accountIDs[shareID] {
 		t.Fatal("friend should see restricted share on accounts")
+	}
+	if !accountIDs[openID] {
+		t.Fatal("friend should see open account with no grants")
+	}
+	if !accountIDs[limitedID] {
+		t.Fatal("friend should see user-limited account they are granted")
 	}
 }
 

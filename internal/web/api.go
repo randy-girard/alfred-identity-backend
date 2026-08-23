@@ -242,7 +242,8 @@ func (s *Server) handleAccountSub(w http.ResponseWriter, r *http.Request) {
 			}
 			setAccess := body.Access != nil || body.RequiredRoleID != nil || body.RequiredRoleIDs != nil ||
 				body.RequiredUserID != nil || body.RequiredUserIDs != nil || body.GroupIDs != nil
-			if s.rejectRestrictedAccountManage(w, ctx, accountID, u, setAccess) {
+			setPassword := body.Password != nil && strings.TrimSpace(*body.Password) != ""
+			if s.rejectRestrictedAccountManage(w, ctx, accountID, u, setAccess, setPassword) {
 				return
 			}
 			changed := false
@@ -310,7 +311,7 @@ func (s *Server) handleAccountSub(w http.ResponseWriter, r *http.Request) {
 			s.hub.BroadcastFullState()
 			writeJSON(w, http.StatusOK, map[string]any{"ok": true, "account_id": accountID})
 		case http.MethodDelete:
-			if s.rejectRestrictedAccountManage(w, ctx, accountID, u, false) {
+			if s.rejectRestrictedAccountManage(w, ctx, accountID, u, false, false) {
 				return
 			}
 			if err := s.store.DeleteEQAccount(ctx, accountID); err != nil {
@@ -334,7 +335,7 @@ func (s *Server) handleAccountSub(w http.ResponseWriter, r *http.Request) {
 			if s.rejectIfReadonly(w, r) {
 				return
 			}
-			if s.rejectRestrictedAccountManage(w, ctx, accountID, u, false) {
+			if s.rejectRestrictedAccountManage(w, ctx, accountID, u, false, false) {
 				return
 			}
 		default:
