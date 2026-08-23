@@ -257,6 +257,11 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.handleAdmin(ctx, c, client, &user, &authed, tip.Type, data)
 
 		case "pong":
+		case "ping":
+			if !authed {
+				continue
+			}
+			_ = writeJSON(ctx, c, client, map[string]any{"type": "pong"})
 		default:
 			_ = writeJSON(ctx, c, client, map[string]any{"type": "error", "message": "unknown type"})
 		}
