@@ -1,6 +1,7 @@
 # Secrets / local env
 .env
 .env.*
+.envrc
 !.env.example
 
 # Build
