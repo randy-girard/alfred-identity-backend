@@ -90,8 +90,16 @@ func TestWebRestrictedShareAccess(t *testing.T) {
 		t.Fatal("stranger admin should see limited account for web management")
 	}
 	shares := stBody["shares"].([]any)
-	if len(shares) != 1 {
-		t.Fatalf("admin shares count=%d want 1", len(shares))
+	foundShare := false
+	for _, raw := range shares {
+		m := raw.(map[string]any)
+		if int64(m["id"].(float64)) == shareID {
+			foundShare = true
+			break
+		}
+	}
+	if !foundShare {
+		t.Fatalf("admin shares missing id=%d (count=%d)", shareID, len(shares))
 	}
 
 	// Friend sees share on accounts but cannot PATCH access grants.

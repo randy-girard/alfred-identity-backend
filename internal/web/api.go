@@ -47,27 +47,32 @@ func (s *Server) buildState(ctx context.Context, u store.User) (map[string]any, 
 	if err != nil {
 		return nil, err
 	}
-	online := s.presence.Online()
+	online := []store.OnlineEntry{}
 	sessions := []map[string]any{}
-	for _, e := range s.presence.Snapshot() {
-		sessions = append(sessions, map[string]any{
-			"account_id":     e.AccountID,
-			"character_name": e.CharacterName,
-			"user_id":        e.UserID,
-			"last_seen":      e.LastSeen.UTC().Format(time.RFC3339),
-		})
+	if s.presence != nil {
+		online = s.presence.Online()
+		for _, e := range s.presence.Snapshot() {
+			sessions = append(sessions, map[string]any{
+				"account_id":     e.AccountID,
+				"character_name": e.CharacterName,
+				"user_id":        e.UserID,
+				"last_seen":      e.LastSeen.UTC().Format(time.RFC3339),
+			})
+		}
 	}
 	connections := []map[string]any{}
-	for _, c := range s.hub.Connections() {
-		connections = append(connections, map[string]any{
-			"session_id":     c.SessionID,
-			"user_id":        c.UserID,
-			"discord_id":     c.DiscordID,
-			"display_name":   c.DisplayName,
-			"client_version": c.ClientVersion,
-			"connected_at":   c.ConnectedAt.UTC().Format(time.RFC3339),
-			"is_admin":       c.IsAdmin,
-		})
+	if s.hub != nil {
+		for _, c := range s.hub.Connections() {
+			connections = append(connections, map[string]any{
+				"session_id":     c.SessionID,
+				"user_id":        c.UserID,
+				"discord_id":     c.DiscordID,
+				"display_name":   c.DisplayName,
+				"client_version": c.ClientVersion,
+				"connected_at":   c.ConnectedAt.UTC().Format(time.RFC3339),
+				"is_admin":       c.IsAdmin,
+			})
+		}
 	}
 	groups, err := s.store.ListGroupDetails(ctx)
 	if err != nil {

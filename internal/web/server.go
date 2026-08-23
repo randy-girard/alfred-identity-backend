@@ -80,6 +80,9 @@ func New(opts Options) *Server {
 	if s.log == nil {
 		s.log = slog.Default()
 	}
+	if s.presence == nil {
+		s.presence = presence.New(5 * time.Minute)
+	}
 	if opts.Hub != nil {
 		opts.Hub.OnStateChange(func() {
 			s.broadcastLiveState()
