@@ -21,7 +21,7 @@ Re-sends `full_state` for the authenticated user (after Discord group/account ch
 ```json
 { "type": "login_auth", "request_id": "uuid", "username": "tag-alias-or-character" }
 ```
-Daemon is authoritative: resolve **tag** (shared → cycle free accounts), unique **alias**, or **character** → allowed non-disabled accounts → skip busy → return first free.
+Daemon is authoritative: resolve **tag** (shared → cycle free / non-busy accounts), unique **alias**, **username**, or **character** → allowed non-disabled accounts. Busy/presence skipping applies **only** to multi-account **tag** pools; direct identity matches always return credentials (EQ reports already-logged-in if the session is occupied).
 
 ### `heartbeat`
 ```json
