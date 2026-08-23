@@ -50,3 +50,22 @@ func TestPickLoginCandidateSingleTagAllowsBusy(t *testing.T) {
 		t.Fatalf("single tagged account should still be choosable, got %d", got)
 	}
 }
+
+func TestPickLoginCandidateEmptyAndAliasDirect(t *testing.T) {
+	if got := pickLoginCandidate(nil, nil); got != 0 {
+		t.Fatalf("empty=%d", got)
+	}
+	got := pickLoginCandidate([]store.LoginCandidate{
+		{ID: 3, ByAlias: true},
+		{ID: 4, ByTag: true},
+	}, presence.New(time.Minute))
+	if got != 3 {
+		t.Fatalf("alias direct should win, got %d", got)
+	}
+	got = pickLoginCandidate([]store.LoginCandidate{
+		{ID: 5, ByCharacter: true},
+	}, nil)
+	if got != 5 {
+		t.Fatalf("character direct=%d", got)
+	}
+}
