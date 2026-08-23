@@ -1412,7 +1412,7 @@ func (s *Store) AllowedAccountIDs(ctx context.Context, u User) ([]int64, error) 
 	return ids, rows.Err()
 }
 
-func (s *Store) ResolveLoginCandidates(ctx context.Context, u User, name string) ([]int64, error) {
+func (s *Store) ResolveLoginCandidates(ctx context.Context, u User, name string) ([]LoginCandidate, error) {
 	allowed, err := s.AllowedAccountIDs(ctx, u)
 	if err != nil {
 		return nil, err
@@ -1425,7 +1425,6 @@ func (s *Store) ResolveLoginCandidates(ctx context.Context, u User, name string)
 		return nil, nil
 	}
 	blind := crypto.BlindIndex(s.Key, strings.ToLower(name))
-	// Build IN clause safely with placeholders.
 	args := make([]any, 0, len(allowed)+2)
 	args = append(args, name, blind)
 	ph := make([]string, len(allowed))
@@ -1434,7 +1433,12 @@ func (s *Store) ResolveLoginCandidates(ctx context.Context, u User, name string)
 		ph[i] = fmt.Sprintf("$%d", i+3)
 	}
 	q := fmt.Sprintf(`
-		SELECT DISTINCT a.id FROM eq_accounts a
+		SELECT DISTINCT a.id,
+		  (a.username_blind = $2) AS by_user,
+		  EXISTS (SELECT 1 FROM account_tags t WHERE t.eq_account_id=a.id AND lower(t.tag)=lower($1)) AS by_tag,
+		  EXISTS (SELECT 1 FROM aliases al WHERE al.eq_account_id=a.id AND lower(al.alias)=lower($1)) AS by_alias,
+		  EXISTS (SELECT 1 FROM characters c WHERE c.eq_account_id=a.id AND lower(c.name)=lower($1)) AS by_char
+		FROM eq_accounts a
 		WHERE a.disabled = false
 		  AND a.id IN (%s)
 		  AND (
@@ -1450,15 +1454,34 @@ func (s *Store) ResolveLoginCandidates(ctx context.Context, u User, name string)
 		return nil, err
 	}
 	defer rows.Close()
-	var ids []int64
+	var out []LoginCandidate
 	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
+		var c LoginCandidate
+		var byUser, byTag, byAlias, byChar bool
+		if err := rows.Scan(&c.ID, &byUser, &byTag, &byAlias, &byChar); err != nil {
 			return nil, err
 		}
-		ids = append(ids, id)
+		c.ByUser = byUser
+		c.ByTag = byTag
+		c.ByAlias = byAlias
+		c.ByCharacter = byChar
+		out = append(out, c)
 	}
-	return ids, rows.Err()
+	return out, rows.Err()
+}
+
+// LoginCandidate is an EQ account that matched a login_auth username/tag/alias/character.
+type LoginCandidate struct {
+	ID          int64
+	ByUser      bool
+	ByTag       bool
+	ByAlias     bool
+	ByCharacter bool
+}
+
+// Direct reports a concrete identity match (not tag-pool rotation).
+func (c LoginCandidate) Direct() bool {
+	return c.ByUser || c.ByAlias || c.ByCharacter
 }
 
 func (s *Store) FullStateForUser(ctx context.Context, u User, online []OnlineEntry) (FullState, error) {

@@ -175,13 +175,7 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				})
 				continue
 			}
-			var chosen int64
-			for _, id := range cands {
-				if !h.Presence.IsBusy(id) {
-					chosen = id
-					break
-				}
-			}
+			chosen := pickLoginCandidate(cands, h.Presence)
 			if chosen == 0 {
 				_ = writeJSON(ctx, c, client, map[string]any{
 					"type": "login_auth_response", "request_id": msg.RequestID, "error": "all_busy",
@@ -1051,6 +1045,36 @@ func writeJSON(ctx context.Context, c *websocket.Conn, cl *wsClient, v any) erro
 }
 
 func (h *Hub) SetRatePerMin(n int) { h.ratePerMin = n }
+
+// pickLoginCandidate chooses an account for login_auth.
+// Direct matches (username / alias / character) are never blocked by presence —
+// EQ will show already-logged-in if needed. Tag pools skip busy accounts so
+// clients can rotate to a free box.
+func pickLoginCandidate(cands []store.LoginCandidate, pres *presence.Tracker) int64 {
+	if len(cands) == 0 {
+		return 0
+	}
+	var direct, tagPool []store.LoginCandidate
+	for _, c := range cands {
+		if c.Direct() {
+			direct = append(direct, c)
+		} else if c.ByTag {
+			tagPool = append(tagPool, c)
+		}
+	}
+	if len(direct) > 0 {
+		return direct[0].ID
+	}
+	if len(tagPool) == 1 {
+		return tagPool[0].ID
+	}
+	for _, c := range tagPool {
+		if pres == nil || !pres.IsBusy(c.ID) {
+			return c.ID
+		}
+	}
+	return 0
+}
 
 func validateUsername(s string) error {
 	if s == "" {
