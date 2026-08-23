@@ -226,6 +226,7 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			acctID, err := h.Store.AccountIDByCharacter(ctx, msg.CharacterName)
 			if err != nil {
+				log.Debug("heartbeat unknown character", "character", msg.CharacterName, "err", err)
 				continue
 			}
 			allowed, err := h.Store.AllowedAccountIDs(ctx, user)
@@ -240,6 +241,7 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			if !ok {
+				log.Debug("heartbeat account not allowed", "character", msg.CharacterName, "account_id", acctID, "user_id", user.ID)
 				continue
 			}
 			if msg.Offline {
@@ -247,6 +249,7 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			} else {
 				h.Presence.Touch(acctID, msg.CharacterName, user.ID)
 			}
+			h.notifyStateListeners()
 
 		case "share_account", "unshare_account":
 			h.handleShare(ctx, c, client, &user, &authed, tip.Type, data)
