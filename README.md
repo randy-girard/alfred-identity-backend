@@ -90,7 +90,7 @@ Mutations from the web admin or GUI admin API broadcast `full_state` to all conn
 
 1. Copy `.env.example` → `.env` and set `DATA_ENCRYPTION_KEY`.
 2. Start with `docker compose up --build`.
-3. **With Discord:** follow [docs/discord-bot-setup.md](docs/discord-bot-setup.md), set `DISCORD_ENABLED=true`, invite the bot, configure guild/admin role/bootstrap IDs.
+3. **With Discord:** follow [Discord bot setup](#discord-bot-setup) below (full detail: [docs/discord-bot-setup.md](docs/discord-bot-setup.md)).
 4. **Without Discord:** leave `DISCORD_ENABLED=false`, then:
    ```bash
    go run ./cmd/seedtoken <discord_id> <display_name>
@@ -128,9 +128,56 @@ Set **`SSO_SOURCE_NAME`** in `.env` to customize the `name` field in Discord `/s
 | **Base** (default) | Anyone with a valid SSO token |
 | **Elevated** | SSO token **and** the Discord role set on that account |
 | **Group / user grants** | OR-combined with role requirements on each account |
-| **Private share** | Owner-granted copies from another user's Local → Share |
+| **Private share** | Owner-granted copies from another user's Local → Share (users, Discord roles, and/or access groups) |
 
 Discord roles for elevated access sync automatically (periodic + member events). See [docs/discord-bot-setup.md](docs/discord-bot-setup.md).
+
+### Discord bot setup
+
+Use this when `DISCORD_ENABLED=true`. Step-by-step with screenshots-level detail: [docs/discord-bot-setup.md](docs/discord-bot-setup.md).
+
+#### Developer Portal
+
+1. [Create an application](https://discord.com/developers/applications) → copy **Application ID** → `DISCORD_CLIENT_ID`.
+2. **Bot** → Add Bot → copy token → `DISCORD_TOKEN`.
+3. **Bot → Privileged Gateway Intents** — turn **ON** only **Server Members Intent** (role sync). Leave Presence and Message Content **OFF**.
+
+#### Invite the bot (permissions)
+
+**OAuth2 → URL Generator:**
+
+| Setting | Value |
+|---------|--------|
+| Scopes | `bot`, `applications.commands` |
+| Bot permissions | View Channels, Send Messages, Embed Links, Use Application Commands |
+
+Or open this URL (replace `YOUR_CLIENT_ID`):
+
+```
+https://discord.com/api/oauth2/authorize?client_id=YOUR_CLIENT_ID&permissions=2147503104&scope=bot%20applications.commands
+```
+
+| Permission | Why |
+|------------|-----|
+| View Channels | Baseline guild access |
+| Send Messages | DMs when a private account is shared with someone |
+| Embed Links | Ephemeral `/sso` and `/whoami` replies |
+| Use Application Commands | Slash commands in your guild |
+
+Do **not** grant Administrator — the bot only reads roles and sends slash/DM messages.
+
+After inviting, set in `.env`:
+
+- `DISCORD_GUILD_ID` — right-click your server → Copy Server ID (Developer Mode on)
+- `DISCORD_ADMIN_ROLE_ID` — operator role snowflake
+- `DISCORD_BOOTSTRAP_ADMIN_IDS` — your user snowflake(s), comma-separated
+- `DISCORD_ENABLED=true`
+
+Restart the daemon. You should see `discord ready` in logs and slash commands `/alfred-identity-sso` / `/alfred-identity-whoami` in the guild.
+
+**Share DMs:** recipients must allow *Direct messages from server members* in Discord privacy settings.
+
+**Web admin (optional):** separate user OAuth — `identify` + `guilds.members.read`, redirect `{WEB_PUBLIC_URL}/admin/oauth/callback`. See [docs/web-admin.md](docs/web-admin.md).
 
 ### Discord slash commands
 
@@ -183,7 +230,7 @@ See [.env.example](.env.example) for the full list.
 
 ## Docs
 
-- [docs/discord-bot-setup.md](docs/discord-bot-setup.md) — Discord application, intents, slash commands, group restrictions
+- [docs/discord-bot-setup.md](docs/discord-bot-setup.md) — Discord application, intents, bot permissions, invite URL, share DMs, slash commands
 - [docs/web-admin.md](docs/web-admin.md) — OAuth web admin, CSV import, live updates
 - [docs/deploy-tls.md](docs/deploy-tls.md) — TLS reverse proxy
 - [docs/ws-api.md](docs/ws-api.md) — WebSocket contract (mirrored in the GUI repo)
