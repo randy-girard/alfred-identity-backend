@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/alfred-identity/web/internal/store"
 	"github.com/coder/websocket"
 )
 
@@ -37,7 +38,7 @@ func (s *Server) handleLiveWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.liveMu.Lock()
-	s.live[c] = struct{}{}
+	s.live[c] = u
 	s.liveMu.Unlock()
 	defer func() {
 		s.liveMu.Lock()
@@ -46,7 +47,7 @@ func (s *Server) handleLiveWS(w http.ResponseWriter, r *http.Request) {
 		_ = c.Close(websocket.StatusNormalClosure, "")
 	}()
 
-	s.pushStateTo(r.Context(), c)
+	s.pushStateTo(r.Context(), c, u)
 
 	// Keep connection open; server pushes on Hub broadcasts. Read to detect close.
 	for {
@@ -56,10 +57,10 @@ func (s *Server) handleLiveWS(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) pushStateTo(ctx context.Context, c *websocket.Conn) {
+func (s *Server) pushStateTo(ctx context.Context, c *websocket.Conn, u store.User) {
 	stCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	st, err := s.buildState(stCtx)
+	st, err := s.buildState(stCtx, u)
 	if err != nil {
 		return
 	}
@@ -75,9 +76,9 @@ func (s *Server) pushStateTo(ctx context.Context, c *websocket.Conn) {
 
 func (s *Server) broadcastLiveState() {
 	s.liveMu.Lock()
-	conns := make([]*websocket.Conn, 0, len(s.live))
-	for c := range s.live {
-		conns = append(conns, c)
+	conns := make(map[*websocket.Conn]store.User, len(s.live))
+	for c, u := range s.live {
+		conns[c] = u
 	}
 	s.liveMu.Unlock()
 	if len(conns) == 0 {
@@ -85,16 +86,16 @@ func (s *Server) broadcastLiveState() {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	st, err := s.buildState(ctx)
-	if err != nil {
-		return
-	}
-	st["type"] = "state"
-	msg, err := json.Marshal(st)
-	if err != nil {
-		return
-	}
-	for _, c := range conns {
+	for c, u := range conns {
+		st, err := s.buildState(ctx, u)
+		if err != nil {
+			continue
+		}
+		st["type"] = "state"
+		msg, err := json.Marshal(st)
+		if err != nil {
+			continue
+		}
 		wctx, c2 := context.WithTimeout(ctx, 3*time.Second)
 		if err := c.Write(wctx, websocket.MessageText, msg); err != nil {
 			s.liveMu.Lock()

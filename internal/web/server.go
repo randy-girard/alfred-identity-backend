@@ -40,7 +40,7 @@ type Server struct {
 	sourceName   string
 
 	liveMu sync.Mutex
-	live   map[*websocket.Conn]struct{}
+	live   map[*websocket.Conn]store.User
 }
 
 type Options struct {
@@ -75,7 +75,7 @@ func New(opts Options) *Server {
 		bootstrapIDs: append([]string{}, opts.BootstrapAdminIDs...),
 		adminRoleID:  opts.AdminRoleID,
 		sourceName:   strings.TrimSpace(opts.SSOSourceName),
-		live:         make(map[*websocket.Conn]struct{}),
+		live:         make(map[*websocket.Conn]store.User),
 	}
 	if s.log == nil {
 		s.log = slog.Default()

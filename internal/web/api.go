@@ -34,8 +34,12 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) buildState(ctx context.Context) (map[string]any, error) {
-	accounts, err := s.store.ListEQAccountMetas(ctx, nil, true)
+func (s *Server) buildState(ctx context.Context, u store.User) (map[string]any, error) {
+	accounts, err := s.webVisibleAccounts(ctx, u)
+	if err != nil {
+		return nil, err
+	}
+	shares, err := s.webVisibleShares(ctx, u)
 	if err != nil {
 		return nil, err
 	}
@@ -72,6 +76,7 @@ func (s *Server) buildState(ctx context.Context) (map[string]any, error) {
 	return map[string]any{
 		"ok":          true,
 		"accounts":    accounts,
+		"shares":      shares,
 		"online":      online,
 		"sessions":    sessions,
 		"connections": connections,
@@ -88,7 +93,7 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	st, err := s.buildState(ctx)
+	st, err := s.buildState(ctx, currentUser(r))
 	if err != nil {
 		s.log.Error("web state", "err", err)
 		writeErr(w, http.StatusInternalServerError, "internal")
@@ -235,6 +240,11 @@ func (s *Server) handleAccountSub(w http.ResponseWriter, r *http.Request) {
 				writeErr(w, http.StatusBadRequest, "bad_request")
 				return
 			}
+			setAccess := body.Access != nil || body.RequiredRoleID != nil || body.RequiredRoleIDs != nil ||
+				body.RequiredUserID != nil || body.RequiredUserIDs != nil || body.GroupIDs != nil
+			if s.rejectRestrictedAccountManage(w, ctx, accountID, u, setAccess) {
+				return
+			}
 			changed := false
 			if body.Password != nil && *body.Password != "" {
 				if err := s.store.SetEQPassword(ctx, accountID, *body.Password); err != nil {
@@ -250,8 +260,6 @@ func (s *Server) handleAccountSub(w http.ResponseWriter, r *http.Request) {
 				}
 				changed = true
 			}
-			setAccess := body.Access != nil || body.RequiredRoleID != nil || body.RequiredRoleIDs != nil ||
-				body.RequiredUserID != nil || body.RequiredUserIDs != nil || body.GroupIDs != nil
 			if setAccess {
 				var roleIDs []string
 				var userIDs []int64
@@ -302,6 +310,9 @@ func (s *Server) handleAccountSub(w http.ResponseWriter, r *http.Request) {
 			s.hub.BroadcastFullState()
 			writeJSON(w, http.StatusOK, map[string]any{"ok": true, "account_id": accountID})
 		case http.MethodDelete:
+			if s.rejectRestrictedAccountManage(w, ctx, accountID, u, false) {
+				return
+			}
 			if err := s.store.DeleteEQAccount(ctx, accountID); err != nil {
 				writeErr(w, http.StatusInternalServerError, "internal")
 				return
@@ -321,6 +332,9 @@ func (s *Server) handleAccountSub(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodPost, http.MethodDelete:
 			if s.rejectIfReadonly(w, r) {
+				return
+			}
+			if s.rejectRestrictedAccountManage(w, ctx, accountID, u, false) {
 				return
 			}
 		default:

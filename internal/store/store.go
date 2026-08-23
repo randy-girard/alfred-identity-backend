@@ -1060,6 +1060,11 @@ func (s *Store) LoadEQAccountMeta(ctx context.Context, id int64) (EQAccountMeta,
 	return s.loadEQAccountMeta(ctx, id, nil)
 }
 
+// LoadEQAccountMetaForViewer loads account metadata with share recipient lists visible only to the owner.
+func (s *Store) LoadEQAccountMetaForViewer(ctx context.Context, id int64, viewer User) (EQAccountMeta, error) {
+	return s.loadEQAccountMeta(ctx, id, &viewer)
+}
+
 func (s *Store) loadEQAccountMeta(ctx context.Context, id int64, viewer *User) (EQAccountMeta, error) {
 	var disabled, restricted bool
 	var reqRole string

@@ -42,7 +42,7 @@ function toggleTheme() {
   }
 }
 
-let state = { accounts: [], users: [], roles: [], groups: [], sessions: [], connections: [], online: [] }
+let state = { accounts: [], shares: [], users: [], roles: [], groups: [], sessions: [], connections: [], online: [] }
 let me = null
 let tab = 'overview'
 let busy = false
@@ -81,6 +81,24 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({
 
 function isWebAdmin() {
   return (me?.web_role || (me?.is_admin ? 'admin' : '')) === 'admin'
+}
+
+function myUserId() {
+  return Number(me?.user_id || 0)
+}
+
+function isShareOwner(a) {
+  return !!a?.restricted && Number(a.owner_user_id) === myUserId()
+}
+
+function canManageAccount(a) {
+  if (!isWebAdmin()) return false
+  if (a?.restricted) return isShareOwner(a)
+  return true
+}
+
+function canManageShare(a) {
+  return isWebAdmin() && isShareOwner(a)
 }
 
 function webRoleLabel(role) {
@@ -184,6 +202,7 @@ async function refreshState(skipRender) {
 function applyState(data, skipRender) {
   state = {
     accounts: data.accounts || [],
+    shares: data.shares || [],
     users: data.users || [],
     roles: data.roles || [],
     groups: data.groups || [],
@@ -685,7 +704,8 @@ function overviewStats() {
   const sessions = state.sessions || []
   const connections = state.connections || []
   const disabled = accounts.filter((a) => a.disabled).length
-  const restricted = accounts.filter((a) => a.restricted && !a.disabled).length
+  const shares = state.shares || []
+  const restricted = shares.filter((a) => !a.disabled).length
   const elevated = accounts.filter((a) => !a.disabled && !a.restricted && (
     (a.required_role_ids && a.required_role_ids.length) || a.required_role_id
     || (a.required_user_ids && a.required_user_ids.length) || a.required_user_id
@@ -971,7 +991,9 @@ function renderAccounts() {
       <td>${esc(groups.join(', ') || '—')}</td>
       <td>${access}</td>
       <td class="col-actions">
-        <button type="button" class="secondary" data-edit="${a.id}" ${isWebAdmin() ? '' : 'disabled title="Read-only access"'}>Edit</button>
+        ${canManageAccount(a)
+    ? `<button type="button" class="secondary" data-edit="${a.id}">Edit</button>`
+    : (a.restricted ? '<span class="muted">shared</span>' : '<button type="button" class="secondary" disabled title="Read-only access">Edit</button>')}
       </td>
     </tr>`
   }).join('')
@@ -990,6 +1012,7 @@ function renderAccounts() {
       <p class="hint">
         Use <strong>Edit</strong> to manage password, access (roles, users, groups), aliases, tags, and characters.
         Empty access grants mean <strong>all</strong> SSO users.
+        Private shares you have access to appear here read-only; owners manage them from the desktop GUI or <strong>Shared accounts</strong>.
       </p>
       <div class="table-wrap">
         <table class="data-table">
@@ -1163,7 +1186,9 @@ function renderAccountModalBody() {
     <div><label>${isEdit ? 'New password' : 'Password'}</label>
       <input id="m-pass" type="password" value="" placeholder="${isEdit ? 'Leave blank to keep' : ''}" autocomplete="off"/>
     </div>
-    ${accessFieldsHTML({
+    ${accountForm.restricted
+    ? '<p class="hint form-span">Access for this private share (users, roles, groups) is managed in the desktop GUI (<strong>Local → Share</strong>).</p>'
+    : accessFieldsHTML({
       required_role_ids: f.required_role_ids,
       required_user_ids: f.required_user_ids,
       group_ids: f.group_ids,
@@ -1235,6 +1260,7 @@ function openAccountModal(account) {
     accountForm = {
       id: account.id,
       username: account.username || '',
+      restricted: !!account.restricted,
       disabled: !!account.disabled,
       required_role_ids: (account.required_role_ids && account.required_role_ids.length)
         ? [...account.required_role_ids]
@@ -1251,6 +1277,7 @@ function openAccountModal(account) {
     accountForm = {
       id: null,
       username: '',
+      restricted: false,
       disabled: false,
       required_role_ids: [],
       required_user_ids: [],
@@ -1311,7 +1338,7 @@ function openAccountModal(account) {
     })
   })
   root.querySelector('[data-save]').addEventListener('click', () => run(async () => {
-    const access = readAccessFields(root)
+    const access = accountForm.restricted ? {} : readAccessFields(root)
     if (accountForm.id) {
       const password = root.querySelector('#m-pass').value
       const disabled = !!root.querySelector('#m-dis')?.checked
@@ -1485,7 +1512,10 @@ function groupNamesForAccount(a) {
 
 function accountAccessLabel(a) {
   if (a.disabled) return 'disabled'
-  if (a.restricted) return 'private share'
+  if (a.restricted) {
+    if (isShareOwner(a)) return 'private share (owner)'
+    return 'private share (shared with you)'
+  }
   const parts = []
   const roleIDs = (a.required_role_ids && a.required_role_ids.length)
     ? a.required_role_ids
@@ -1769,7 +1799,7 @@ function shareGrantsHTML(a) {
 }
 
 function renderShares() {
-  const shared = sortRows((state.accounts || []).filter((a) => a.restricted), 'shares', {
+  const shared = sortRows(state.shares || [], 'shares', {
     username: (a) => a.username || '',
     owner: (a) => {
       const o = a.owner_user_id ? userByID(a.owner_user_id) : null
@@ -1784,7 +1814,9 @@ function renderShares() {
       <td>${owner ? discordUserHTML(owner) : '<span class="muted">—</span>'}</td>
       <td class="col-stack"><div class="stack-list">${shareGrantsHTML(a)}</div></td>
       <td class="col-actions">
-        <button type="button" class="danger" data-del-share="${a.id}" ${isWebAdmin() ? '' : 'disabled title="Read-only access"'}>Remove</button>
+        ${canManageShare(a)
+    ? `<button type="button" class="danger" data-del-share="${a.id}">Remove</button>`
+    : '<span class="muted">—</span>'}
       </td>
     </tr>`
   }).join('')
@@ -1818,7 +1850,7 @@ function renderShares() {
 function bindShares(root) {
   root.querySelectorAll('[data-del-share]').forEach((btn) => {
     btn.onclick = () => run(async () => {
-      const a = state.accounts.find((x) => String(x.id) === btn.dataset.delShare)
+      const a = (state.shares || []).find((x) => String(x.id) === btn.dataset.delShare)
       const label = a?.username || `#${btn.dataset.delShare}`
       if (!confirm(`Remove private share “${label}”? This deletes the SSO copy for everyone.`)) return
       await api(`/admin/api/accounts/${btn.dataset.delShare}`, { method: 'DELETE' })
