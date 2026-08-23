@@ -1749,6 +1749,25 @@ function bindGroups(root) {
   })
 }
 
+function shareGrantsHTML(a) {
+  const parts = []
+  for (const uid of a.shared_user_ids || []) {
+    const u = userByID(uid)
+    parts.push(`<div class="stack-item">${discordUserHTML(u)}</div>`)
+  }
+  const roleIDs = (a.required_role_ids && a.required_role_ids.length)
+    ? a.required_role_ids
+    : (a.required_role_id ? [a.required_role_id] : [])
+  for (const rid of roleIDs) {
+    parts.push(`<div class="stack-item"><span class="badge">role</span> ${esc(roleName(rid))}</div>`)
+  }
+  for (const gid of a.group_ids || []) {
+    const g = groupByID(gid)
+    parts.push(`<div class="stack-item"><span class="badge">group</span> ${esc(g?.name || `group #${gid}`)}</div>`)
+  }
+  return parts.length ? parts.join('') : '<span class="muted">Owner only</span>'
+}
+
 function renderShares() {
   const shared = sortRows((state.accounts || []).filter((a) => a.restricted), 'shares', {
     username: (a) => a.username || '',
@@ -1756,18 +1775,14 @@ function renderShares() {
       const o = a.owner_user_id ? userByID(a.owner_user_id) : null
       return o?.display_name || o?.discord_id || ''
     },
-    sharees: (a) => (a.shared_user_ids || []).length,
+    sharees: (a) => (a.shared_user_ids || []).length + (a.group_ids || []).length + ((a.required_role_ids && a.required_role_ids.length) || a.required_role_id ? 1 : 0),
   })
 	const rows = shared.map((a) => {
     const owner = a.owner_user_id ? userByID(a.owner_user_id) : null
-    const sharees = (a.shared_user_ids || []).map((id) => userByID(id))
-    const shareList = sharees.length
-      ? sharees.map((u) => `<div class="stack-item">${discordUserHTML(u)}</div>`).join('')
-      : '<span class="muted">Owner only</span>'
     return `<tr>
       <td class="mono">${esc(a.username || '#' + a.id)}</td>
       <td>${owner ? discordUserHTML(owner) : '<span class="muted">—</span>'}</td>
-      <td class="col-stack"><div class="stack-list">${shareList}</div></td>
+      <td class="col-stack"><div class="stack-list">${shareGrantsHTML(a)}</div></td>
       <td class="col-actions">
         <button type="button" class="danger" data-del-share="${a.id}" ${isWebAdmin() ? '' : 'disabled title="Read-only access"'}>Remove</button>
       </td>
@@ -1780,7 +1795,7 @@ function renderShares() {
         <h2>Shared accounts</h2>
       </div>
       <p class="hint">
-        Private SSO copies from desktop <strong>Local → Share</strong>. Who can use them is managed by the <strong>owner in the desktop GUI</strong>.
+        Private SSO copies from desktop <strong>Local → Share</strong>. Owners choose Discord users, roles, and/or access groups.
         Remove deletes the private SSO copy (local CSV on the owner’s machine is unchanged).
       </p>
       <div class="table-wrap">

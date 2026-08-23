@@ -72,7 +72,7 @@ func TestShareRestrictedACL(t *testing.T) {
 	}
 
 	uname := "shareacct_" + randHex(6)
-	id, err := st.ShareLocalAccount(ctx, owner, uname, "secret-pass", []string{"sharealias"}, []int64{friend.ID})
+	id, _, err := st.ShareLocalAccount(ctx, owner, uname, "secret-pass", []string{"sharealias"}, []int64{friend.ID}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,6 +140,90 @@ func TestShareRestrictedACL(t *testing.T) {
 	}
 	if n != 0 {
 		t.Fatalf("account still present count=%d", n)
+	}
+}
+
+func TestShareRestrictedByRole(t *testing.T) {
+	st := openTestStore(t)
+	ctx := context.Background()
+
+	owner, err := st.UpsertUser(ctx, "owner-"+randHex(4), "Owner", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	friend, err := st.UpsertUser(ctx, "friend-"+randHex(4), "Friend", []string{"role-share-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stranger, err := st.UpsertUser(ctx, "stranger-"+randHex(4), "Stranger", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	uname := "shareacct_" + randHex(6)
+	id, _, err := st.ShareLocalAccount(ctx, owner, uname, "secret-pass", nil, nil, []string{"role-share-1"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	friendAllowed, err := st.AllowedAccountIDs(ctx, friend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	strangerAllowed, err := st.AllowedAccountIDs(ctx, stranger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsID(friendAllowed, id) {
+		t.Fatal("user with shared role should see restricted share")
+	}
+	if containsID(strangerAllowed, id) {
+		t.Fatal("user without shared role must not see restricted share")
+	}
+}
+
+func TestShareRestrictedByGroup(t *testing.T) {
+	st := openTestStore(t)
+	ctx := context.Background()
+
+	owner, err := st.UpsertUser(ctx, "owner-"+randHex(4), "Owner", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	friend, err := st.UpsertUser(ctx, "friend-"+randHex(4), "Friend", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stranger, err := st.UpsertUser(ctx, "stranger-"+randHex(4), "Stranger", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	groupID, err := st.CreateGroup(ctx, "share-group-"+randHex(4), "", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AddGroupUser(ctx, groupID, friend.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	uname := "shareacct_" + randHex(6)
+	id, _, err := st.ShareLocalAccount(ctx, owner, uname, "secret-pass", nil, nil, nil, []int64{groupID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	friendAllowed, err := st.AllowedAccountIDs(ctx, friend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	strangerAllowed, err := st.AllowedAccountIDs(ctx, stranger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsID(friendAllowed, id) {
+		t.Fatal("group member should see restricted share")
+	}
+	if containsID(strangerAllowed, id) {
+		t.Fatal("non-member must not see restricted share")
 	}
 }
 

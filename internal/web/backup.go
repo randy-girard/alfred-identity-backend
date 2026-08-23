@@ -310,7 +310,7 @@ func (s *Server) importConfigBackup(ctx context.Context, r io.Reader) (ConfigImp
 				res.Errors = append(res.Errors, fmt.Sprintf("account %s: password required for new restricted account", username))
 				continue
 			}
-			newID, err := s.store.ShareLocalAccount(ctx, owner, username, pw, row.Aliases, shareIDs)
+			newID, _, err := s.store.ShareLocalAccount(ctx, owner, username, pw, row.Aliases, shareIDs, row.RequiredRoleIDs, nil)
 			if err != nil {
 				res.Errors = append(res.Errors, fmt.Sprintf("account %s share: %v", username, err))
 				continue

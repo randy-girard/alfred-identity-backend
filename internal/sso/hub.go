@@ -40,10 +40,16 @@ type Hub struct {
 	perToken          sync.Map // userID -> *rate.Limiter
 	ratePerMin        int
 	Log               *slog.Logger
+	ShareNotifier     AccountShareNotifier
 
 	clientsMu sync.Mutex
 	clients   map[string]*wsClient
 	stateListeners []func()
+}
+
+// AccountShareNotifier sends optional notifications when private shares are granted.
+type AccountShareNotifier interface {
+	NotifyAccountShared(ctx context.Context, owner store.User, accountUsername string, aliases []string, newRecipientUserIDs []int64)
 }
 
 type wsClient struct {
@@ -293,6 +299,8 @@ func (h *Hub) handleShare(ctx context.Context, c *websocket.Conn, client *wsClie
 			Password  string   `json:"password"`
 			Aliases   []string `json:"aliases"`
 			UserIDs   []int64  `json:"user_ids"`
+			RoleIDs   []string `json:"role_ids"`
+			GroupIDs  []int64  `json:"group_ids"`
 		}
 		if err := json.Unmarshal(data, &msg); err != nil {
 			fail("bad_request")
@@ -309,7 +317,7 @@ func (h *Hub) handleShare(ctx context.Context, c *websocket.Conn, client *wsClie
 				return
 			}
 		}
-		id, err := h.Store.ShareLocalAccount(ctx, *user, username, msg.Password, msg.Aliases, msg.UserIDs)
+		id, newRecipients, err := h.Store.ShareLocalAccount(ctx, *user, username, msg.Password, msg.Aliases, msg.UserIDs, msg.RoleIDs, msg.GroupIDs)
 		if err != nil {
 			h.Log.Error("share_account", "err", err)
 			errMsg := err.Error()
@@ -327,7 +335,10 @@ func (h *Hub) handleShare(ctx context.Context, c *websocket.Conn, client *wsClie
 			}
 			return
 		}
-		h.Store.AuditAccount(ctx, user.ID, id, "share_account", fmt.Sprintf("account=%d users=%v", id, msg.UserIDs))
+		h.Store.AuditAccount(ctx, user.ID, id, "share_account", fmt.Sprintf("account=%d users=%v roles=%v groups=%v", id, msg.UserIDs, msg.RoleIDs, msg.GroupIDs))
+		if h.ShareNotifier != nil && len(newRecipients) > 0 {
+			go h.ShareNotifier.NotifyAccountShared(context.Background(), *user, username, msg.Aliases, newRecipients)
+		}
 		_ = writeJSON(ctx, c, client, map[string]any{
 			"type": "share_result", "request_id": reqID, "ok": true, "account_id": id,
 		})
@@ -921,6 +932,9 @@ func (h *Hub) sendFullState(ctx context.Context, cl *wsClient) error {
 	}
 	if groups, err := h.Store.ListGroupDetails(ctx); err == nil {
 		payload["groups"] = groups
+	}
+	if roles, err := h.Store.ListDiscordRoles(ctx); err == nil {
+		payload["roles"] = roles
 	}
 	if activity, err := h.buildShareActivity(ctx, cl.user.ID); err == nil {
 		payload["share_activity"] = activity

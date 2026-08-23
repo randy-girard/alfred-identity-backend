@@ -1303,7 +1303,7 @@ func (s *Store) decryptCredentials(ctx context.Context, accountID int64, include
 }
 
 // AllowedAccountIDs returns EQ accounts the user may use.
-// Restricted accounts: owner + explicit shares only.
+// Restricted accounts: owner, explicit user shares, and any linked Discord role or access group.
 // Otherwise, if the account has no role/user/group grants → any authenticated SSO user ("all").
 // If any grant is set, the user must match at least one: required role, required user, or membership
 // in a linked access group (direct user membership or holding a Discord role on the group).
@@ -1320,6 +1320,32 @@ func (s *Store) AllowedAccountIDs(ctx context.Context, u User) ([]int64, error) 
 		        OR EXISTS (
 		            SELECT 1 FROM account_shares sh
 		            WHERE sh.eq_account_id = a.id AND sh.user_id = $1
+		        )
+		        OR EXISTS (
+		            SELECT 1 FROM account_access_roles ar
+		            WHERE ar.eq_account_id = a.id
+		              AND EXISTS (
+		                  SELECT 1 FROM users uu
+		                  WHERE uu.id = $1
+		                    AND uu.role_ids_json::jsonb ? ar.discord_role_id
+		              )
+		        )
+		        OR EXISTS (
+		            SELECT 1
+		            FROM account_group_links gl
+		            JOIN group_members gm ON gm.group_id = gl.group_id
+		            WHERE gl.eq_account_id = a.id
+		              AND (
+		                gm.user_id = $1
+		                OR (
+		                  gm.discord_role_id IS NOT NULL AND gm.discord_role_id <> ''
+		                  AND EXISTS (
+		                      SELECT 1 FROM users uu
+		                      WHERE uu.id = $1
+		                        AND uu.role_ids_json::jsonb ? gm.discord_role_id
+		                  )
+		                )
+		              )
 		        )
 		      )
 		    )
@@ -1980,65 +2006,100 @@ func (s *Store) SetRestrictedAccountShares(ctx context.Context, accountID int64,
 	return s.replaceAccountShares(ctx, accountID, clean)
 }
 
+// DiffNewShareRecipients returns user IDs in incoming that were not in previous.
+func DiffNewShareRecipients(previous, incoming []int64) []int64 {
+	prev := make(map[int64]bool, len(previous))
+	for _, id := range previous {
+		prev[id] = true
+	}
+	added := make([]int64, 0, len(incoming))
+	for _, id := range incoming {
+		if !prev[id] {
+			added = append(added, id)
+		}
+	}
+	return added
+}
+
 // ShareLocalAccount publishes or updates a restricted EQ account owned by the caller and sets shares.
 // Password is required when creating; optional (empty) when updating an owned account.
-func (s *Store) ShareLocalAccount(ctx context.Context, owner User, username, password string, aliases []string, shareUserIDs []int64) (int64, error) {
+// The returned slice lists share recipients newly granted direct user access (not present before this call).
+func (s *Store) ShareLocalAccount(ctx context.Context, owner User, username, password string, aliases []string, shareUserIDs []int64, shareRoleIDs []string, shareGroupIDs []int64) (int64, []int64, error) {
 	username = strings.TrimSpace(username)
 	if username == "" {
-		return 0, fmt.Errorf("username required")
+		return 0, nil, fmt.Errorf("username required")
 	}
 	cleanShares := make([]int64, 0, len(shareUserIDs))
-	seen := map[int64]bool{}
+	seenUser := map[int64]bool{}
 	for _, uid := range shareUserIDs {
-		if uid <= 0 || uid == owner.ID || seen[uid] {
+		if uid <= 0 || uid == owner.ID || seenUser[uid] {
 			continue
 		}
-		seen[uid] = true
+		seenUser[uid] = true
 		cleanShares = append(cleanShares, uid)
+	}
+	cleanRoles := make([]string, 0, len(shareRoleIDs))
+	seenRole := map[string]bool{}
+	for _, rid := range shareRoleIDs {
+		rid = strings.TrimSpace(rid)
+		if rid == "" || seenRole[rid] {
+			continue
+		}
+		seenRole[rid] = true
+		cleanRoles = append(cleanRoles, rid)
+	}
+	cleanGroups := make([]int64, 0, len(shareGroupIDs))
+	seenGroup := map[int64]bool{}
+	for _, gid := range shareGroupIDs {
+		if gid <= 0 || seenGroup[gid] {
+			continue
+		}
+		seenGroup[gid] = true
+		cleanGroups = append(cleanGroups, gid)
 	}
 
 	id, ok, err := s.FindEQAccountIDByUsername(ctx, username)
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
+	var previousShares []int64
 	if ok {
+		previousShares = s.listShareUserIDs(ctx, id)
 		var restricted bool
 		var ownerID sql.NullInt64
 		if err := s.DB.QueryRowContext(ctx, `
 			SELECT COALESCE(restricted, false), owner_user_id FROM eq_accounts WHERE id=$1
 		`, id).Scan(&restricted, &ownerID); err != nil {
-			return 0, err
+			return 0, nil, err
 		}
 		if !restricted || !ownerID.Valid || ownerID.Int64 != owner.ID {
-			return 0, fmt.Errorf("account already exists on SSO")
+			return 0, nil, fmt.Errorf("account already exists on SSO")
 		}
 		if strings.TrimSpace(password) != "" {
 			if err := s.SetEQPassword(ctx, id, password); err != nil {
-				return 0, err
+				return 0, nil, err
 			}
 		}
 		if _, err := s.DB.ExecContext(ctx, `
 			UPDATE eq_accounts SET restricted=true, owner_user_id=$2, required_discord_role_id='', required_user_id=NULL, updated_at=now()
 			WHERE id=$1
 		`, id, owner.ID); err != nil {
-			return 0, err
+			return 0, nil, err
 		}
-		_ = s.ReplaceAccountRoles(ctx, id, nil)
 		_ = s.ReplaceAccountUsers(ctx, id, nil)
-		_ = s.ReplaceAccountGroups(ctx, id, nil)
 	} else {
 		if strings.TrimSpace(password) == "" {
-			return 0, fmt.Errorf("password required")
+			return 0, nil, fmt.Errorf("password required")
 		}
 		id, err = s.AddEQAccount(ctx, username, password, "")
 		if err != nil {
-			return 0, err
+			return 0, nil, err
 		}
 		if _, err := s.DB.ExecContext(ctx, `
 			UPDATE eq_accounts SET restricted=true, owner_user_id=$2, required_discord_role_id='', required_user_id=NULL, updated_at=now()
 			WHERE id=$1
 		`, id, owner.ID); err != nil {
-			return 0, err
+			return 0, nil, err
 		}
 	}
 
@@ -2050,9 +2111,15 @@ func (s *Store) ShareLocalAccount(ctx context.Context, owner User, username, pas
 		_ = s.AddAlias(ctx, al, id)
 	}
 	if err := s.replaceAccountShares(ctx, id, cleanShares); err != nil {
-		return 0, err
+		return 0, nil, err
 	}
-	return id, nil
+	if err := s.ReplaceAccountRoles(ctx, id, cleanRoles); err != nil {
+		return 0, nil, err
+	}
+	if err := s.ReplaceAccountGroups(ctx, id, cleanGroups); err != nil {
+		return 0, nil, err
+	}
+	return id, DiffNewShareRecipients(previousShares, cleanShares), nil
 }
 
 // UnshareLocalAccount removes a restricted account owned by the caller from SSO.

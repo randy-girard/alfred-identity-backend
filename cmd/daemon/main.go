@@ -121,6 +121,9 @@ func main() {
 			logger.Error("discord open", "err", err)
 			os.Exit(1)
 		}
+		if bot != nil {
+			hub.ShareNotifier = bot
+		}
 		defer bot.Close()
 		logger.Info("discord enabled", "guild_id", cfg.DiscordGuildID)
 	} else {

@@ -36,12 +36,12 @@ Server looks up character → EQ account; marks **account** online. Unknown char
 
 ### `share_account` / `unshare_account` (any authenticated user)
 ```json
-{ "type": "share_account", "request_id": "uuid", "username": "equser", "password": "secret", "aliases": ["tank"], "user_ids": [2, 3] }
+{ "type": "share_account", "request_id": "uuid", "username": "equser", "password": "secret", "aliases": ["tank"], "user_ids": [2, 3], "role_ids": ["123456789012345678"], "group_ids": [1] }
 { "type": "unshare_account", "request_id": "uuid", "username": "equser" }
 ```
-Publishes a **restricted** EQ account owned by the caller (from a local GUI account) and grants SSO login to the listed users only. Empty `user_ids` keeps an owner-only copy. `unshare_account` deletes the restricted SSO copy. Broadcasts `full_state`. Responses use `share_result`.
+Publishes a **restricted** EQ account owned by the caller (from a local GUI account) and grants SSO login to listed Discord users, roles, and/or access groups. Empty grant lists keep an owner-only copy for that type. `unshare_account` deletes the restricted SSO copy. Broadcasts `full_state`. Responses use `share_result`. When Discord is enabled, users **newly** added to the direct user share list receive a DM notification.
 
-`full_state` also includes `directory` (SSO users for the share picker) and `user_id` / `discord_id` / `display_name` for the connected client.
+`full_state` also includes `directory` (SSO users for the share picker), `groups`, `roles`, and `user_id` / `discord_id` / `display_name` for the connected client.
 
 ### `admin_add_account` (admin only)
 ```json
