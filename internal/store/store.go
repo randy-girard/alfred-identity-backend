@@ -328,6 +328,14 @@ func (s *Store) CreateGroup(ctx context.Context, name, desc, webRole string, dis
 	if name == "" {
 		return 0, fmt.Errorf("name required")
 	}
+	if IsDefaultGroupName(name) {
+		if _, ok, err := s.FindGroupIDByName(ctx, DefaultGroupName); err != nil {
+			return 0, err
+		} else if ok {
+			return 0, fmt.Errorf("default group name is reserved")
+		}
+		// EnsureDefaultGroup may create it when missing.
+	}
 	webRole, err := NormalizeWebRole(webRole)
 	if err != nil {
 		return 0, err
@@ -393,6 +401,7 @@ type GroupDetail struct {
 	Description      string      `json:"description"`
 	WebRole          string      `json:"web_role"` // "", "admin", or "readonly"
 	DiscordCommands  []string    `json:"discord_commands"`
+	IsDefault        bool        `json:"is_default"`
 	Users            []GroupUser `json:"users"`
 	UserIDs          []int64     `json:"user_ids"` // legacy / Discord bot
 	RoleIDs          []string    `json:"role_ids"`
@@ -408,7 +417,7 @@ func (s *Store) ListGroups(ctx context.Context) ([]map[string]any, error) {
 	for _, g := range details {
 		out = append(out, map[string]any{
 			"id": g.ID, "name": g.Name, "description": g.Description, "web_role": g.WebRole,
-			"discord_commands": g.DiscordCommands,
+			"discord_commands": g.DiscordCommands, "is_default": g.IsDefault,
 		})
 	}
 	return out, nil
@@ -435,6 +444,7 @@ func (s *Store) ListGroupDetails(ctx context.Context) ([]GroupDetail, error) {
 		if err != nil {
 			return nil, err
 		}
+		g.IsDefault = IsDefaultGroupName(g.Name)
 		g.UserIDs = []int64{}
 		g.Users = []GroupUser{}
 		g.RoleIDs = []string{}
@@ -556,27 +566,75 @@ func (s *Store) HighestWebRoleForUser(ctx context.Context, u User) (string, erro
 // DefaultGroupName is the built-in group auto-assigned when a user has no membership.
 const DefaultGroupName = "Default"
 
-// EnsureDefaultGroup returns the Default group id, creating it if missing.
+// DefaultGroupDiscordCommands are the baseline slash commands granted by Default.
+var DefaultGroupDiscordCommands = []string{"sso", "whoami"}
+
+const defaultGroupDescription = "System group — auto-assigned when a user has no other group. Discord commands only (no web UI)."
+
+// IsDefaultGroupName reports whether name is the reserved Default group.
+func IsDefaultGroupName(name string) bool {
+	return strings.EqualFold(strings.TrimSpace(name), DefaultGroupName)
+}
+
+// IsDefaultGroup reports whether groupID is the reserved Default group.
+func (s *Store) IsDefaultGroup(ctx context.Context, groupID int64) (bool, error) {
+	if groupID <= 0 {
+		return false, nil
+	}
+	var name string
+	err := s.DB.QueryRowContext(ctx, `SELECT name FROM account_groups WHERE id=$1`, groupID).Scan(&name)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return IsDefaultGroupName(name), nil
+}
+
+// EnsureDefaultGroup returns the Default group id, creating it if missing and
+// syncing locked base permissions (no web UI; Discord sso/whoami).
 func (s *Store) EnsureDefaultGroup(ctx context.Context) (int64, error) {
 	if id, ok, err := s.FindGroupIDByName(ctx, DefaultGroupName); err != nil {
 		return 0, err
 	} else if ok {
+		if err := s.syncDefaultGroupBasePerms(ctx, id); err != nil {
+			return 0, err
+		}
 		return id, nil
 	}
 	id, err := s.CreateGroup(ctx,
 		DefaultGroupName,
-		"Auto-assigned when a user has no other group (SSO slash command or first web login).",
-		"readonly",
-		nil,
+		defaultGroupDescription,
+		"",
+		append([]string(nil), DefaultGroupDiscordCommands...),
 	)
 	if err != nil {
 		// Race: another process may have created it.
 		if id2, ok, err2 := s.FindGroupIDByName(ctx, DefaultGroupName); err2 == nil && ok {
+			_ = s.syncDefaultGroupBasePerms(ctx, id2)
 			return id2, nil
 		}
 		return 0, err
 	}
 	return id, nil
+}
+
+func (s *Store) syncDefaultGroupBasePerms(ctx context.Context, groupID int64) error {
+	cmdJSON, err := marshalDiscordCommands(DefaultGroupDiscordCommands)
+	if err != nil {
+		return err
+	}
+	_, err = s.DB.ExecContext(ctx, `
+		UPDATE account_groups
+		SET name=$2, web_role='', discord_commands=$3::jsonb,
+		    description=CASE
+		      WHEN description IS NULL OR btrim(description)='' THEN $4
+		      ELSE description
+		    END
+		WHERE id=$1
+	`, groupID, DefaultGroupName, cmdJSON, defaultGroupDescription)
+	return err
 }
 
 // EnsureUserInDefaultGroupIfNone adds the user to Default when they have no groups
@@ -638,12 +696,26 @@ func (s *Store) UnlinkAccountGroup(ctx context.Context, accountID, groupID int64
 }
 
 // UpdateGroupMeta updates name/description/web_role/discord_commands for a group.
+// The Default system group keeps a locked name and base permissions (no web UI; Discord sso/whoami).
 func (s *Store) UpdateGroupMeta(ctx context.Context, groupID int64, name, description, webRole string, discordCommands []string) error {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return fmt.Errorf("name required")
+	isDefault, err := s.IsDefaultGroup(ctx, groupID)
+	if err != nil {
+		return err
 	}
-	webRole, err := NormalizeWebRole(webRole)
+	if isDefault {
+		name = DefaultGroupName
+		webRole = ""
+		discordCommands = append([]string(nil), DefaultGroupDiscordCommands...)
+	} else {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return fmt.Errorf("name required")
+		}
+		if IsDefaultGroupName(name) {
+			return fmt.Errorf("default group name is reserved")
+		}
+	}
+	webRole, err = NormalizeWebRole(webRole)
 	if err != nil {
 		return err
 	}
@@ -737,6 +809,13 @@ func (s *Store) ReplaceGroupAccountLinks(ctx context.Context, groupID int64, acc
 }
 
 func (s *Store) DeleteGroup(ctx context.Context, groupID int64) error {
+	isDefault, err := s.IsDefaultGroup(ctx, groupID)
+	if err != nil {
+		return err
+	}
+	if isDefault {
+		return fmt.Errorf("default group cannot be deleted")
+	}
 	res, err := s.DB.ExecContext(ctx, `DELETE FROM account_groups WHERE id=$1`, groupID)
 	if err != nil {
 		return err

@@ -1,14 +1,12 @@
 -- +goose Up
 -- Seed a baseline "Default" group for users with no other membership.
--- web_role=readonly so OAuth web UI works after Discord /sso get.
--- discord_commands stays empty so existing open slash-command behavior is unchanged;
--- admins can add sso/whoami on the Groups tab if they want to restrict commands.
+-- Base permissions: no web UI login; Discord /sso and /whoami allowed.
 INSERT INTO account_groups (name, description, web_role, discord_commands)
 SELECT
   'Default',
-  'Auto-assigned when a user has no other group (SSO slash command or first web login).',
-  'readonly',
-  '[]'::jsonb
+  'System group — auto-assigned when a user has no other group. Discord commands only (no web UI).',
+  '',
+  '["sso","whoami"]'::jsonb
 WHERE NOT EXISTS (
   SELECT 1 FROM account_groups WHERE lower(name) = 'default'
 );

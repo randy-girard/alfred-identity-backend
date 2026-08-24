@@ -614,6 +614,10 @@ func (s *Server) handleGroupSub(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodDelete:
 			if err := s.store.DeleteGroup(ctx, groupID); err != nil {
+				if strings.Contains(err.Error(), "cannot be deleted") {
+					writeErr(w, http.StatusBadRequest, "protected_group")
+					return
+				}
 				if strings.Contains(err.Error(), "not found") {
 					writeErr(w, http.StatusNotFound, "not_found")
 					return

@@ -1693,9 +1693,10 @@ function renderGroups() {
       : '—'
     const web = g.web_role || ''
     const cmds = discordCommandsLabel(g.discord_commands)
+    const systemBadge = g.is_default ? '<span class="pill muted" title="System group">Default</span> ' : ''
     return `<tr>
       <td class="col-name">
-        <strong>${esc(g.name)}</strong>
+        <strong>${systemBadge}${esc(g.name)}</strong>
         ${g.description ? `<div class="muted">${esc(g.description)}</div>` : ''}
       </td>
       <td>${esc(webRoleLabel(web))}${web ? '' : '<div class="muted">No web login</div>'}</td>
@@ -1719,6 +1720,8 @@ function renderGroups() {
         Groups bundle Discord <strong>users</strong> and/or <strong>roles</strong>, and link EQ <strong>accounts</strong>.
         Optionally grant <strong>web UI</strong> access (admin or read-only) and/or <strong>Discord slash commands</strong> to group members.
         When any group enables a slash command, only members of groups with that command may use it.
+        The system <strong>Default</strong> group is auto-created, cannot be deleted, grants Discord <code>/sso</code> and <code>/whoami</code>, and does not grant web UI login.
+        Users with no other group are assigned to Default when they run a Discord slash command or sign in.
         Discord admin role and bootstrap admins always have full web access and bypass slash command restrictions.
       </p>
       <div class="table-wrap">
@@ -1744,6 +1747,7 @@ function renderGroups() {
 function openGroupModal(group) {
   const isEdit = !!(group && group.id)
   const g = group || {}
+  const isDefault = !!(g.is_default || (g.name && String(g.name).toLowerCase() === 'default'))
   const selectedUsers = new Set((g.user_ids || []).map(Number))
   const selectedRoles = new Set(g.role_ids || [])
   const selectedAccts = new Set((g.account_ids || []).map(Number))
@@ -1770,14 +1774,15 @@ function openGroupModal(group) {
   root.innerHTML = `
     <div class="modal-backdrop" data-close="1">
       <div class="modal wide" role="dialog">
-        <h2>${isEdit ? 'Edit group' : 'Create access group'}</h2>
+        <h2>${isEdit ? (isDefault ? 'Edit Default group' : 'Edit group') : 'Create access group'}</h2>
+        ${isDefault ? '<p class="hint">System group: name, web UI access, and Discord command grants are locked. You can still manage members and linked accounts.</p>' : ''}
         <div class="form-grid">
-          <div><label>Name</label><input id="m-name" value="${esc(g.name || '')}" autocomplete="off" placeholder="e.g. Raid officers"/></div>
+          <div><label>Name</label><input id="m-name" value="${esc(g.name || '')}" autocomplete="off" placeholder="e.g. Raid officers" ${isDefault ? 'disabled' : ''}/></div>
           <div><label>Description</label><input id="m-desc" value="${esc(g.description || '')}" autocomplete="off"/></div>
           <div class="form-span">
             <label>Web UI access</label>
-            <p class="hint">Optional. Members of this group may sign in to the web admin with the selected permission level.</p>
-            <select id="m-web-role">
+            <p class="hint">${isDefault ? 'Locked off for Default — members cannot sign in from this group alone.' : 'Optional. Members of this group may sign in to the web admin with the selected permission level.'}</p>
+            <select id="m-web-role" ${isDefault ? 'disabled' : ''}>
               <option value="" ${!(g.web_role) ? 'selected' : ''}>Off — no web login from this group</option>
               <option value="readonly" ${g.web_role === 'readonly' ? 'selected' : ''}>Read-only — view only</option>
               <option value="admin" ${g.web_role === 'admin' ? 'selected' : ''}>Admin — full manage access</option>
@@ -1785,7 +1790,7 @@ function openGroupModal(group) {
           </div>
           <div class="form-span">
             <label>Discord slash commands</label>
-            <p class="hint">Members may use the selected bot commands. When any group enables a command, users outside those groups are denied.</p>
+            <p class="hint">${isDefault ? 'Locked to /sso and /whoami for Default.' : 'Members may use the selected bot commands. When any group enables a command, users outside those groups are denied.'}</p>
             <div class="role-list">${discordCommandsFieldHTML(g.discord_commands || [])}</div>
           </div>
           <div class="form-span">
@@ -1805,7 +1810,7 @@ function openGroupModal(group) {
           </div>
         </div>
         <div class="modal-actions">
-          ${isEdit ? '<button type="button" class="danger" data-del-group="1">Delete</button>' : ''}
+          ${isEdit && !isDefault ? '<button type="button" class="danger" data-del-group="1">Delete</button>' : ''}
           <button type="button" class="secondary" data-cancel="1">Cancel</button>
           <button type="button" data-save="1">${isEdit ? 'Save' : 'Create'}</button>
         </div>
@@ -1815,7 +1820,10 @@ function openGroupModal(group) {
     if (e.target.dataset.close) closeModal()
   })
   root.querySelector('[data-cancel]').addEventListener('click', closeModal)
-  if (isEdit) {
+  if (isDefault) {
+    root.querySelectorAll('input[name=m-g-cmd]').forEach((el) => { el.disabled = true })
+  }
+  if (isEdit && !isDefault) {
     root.querySelector('[data-del-group]').addEventListener('click', () => run(async () => {
       if (!confirm('Delete this group? Account links and memberships are removed.')) return
       await api(`/admin/api/groups/${group.id}`, { method: 'DELETE' })
@@ -1829,7 +1837,7 @@ function openGroupModal(group) {
       name,
       description: root.querySelector('#m-desc').value.trim(),
       web_role: root.querySelector('#m-web-role').value,
-      discord_commands: readDiscordCommandsFromModal(root),
+      discord_commands: isDefault ? ['sso', 'whoami'] : readDiscordCommandsFromModal(root),
       user_ids: [...root.querySelectorAll('input[name=m-g-user]:checked')].map((i) => Number(i.value)),
       role_ids: [...root.querySelectorAll('input[name=m-g-role]:checked')].map((i) => i.value),
       account_ids: [...root.querySelectorAll('input[name=m-g-acct]:checked')].map((i) => Number(i.value)),

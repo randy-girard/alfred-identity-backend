@@ -192,7 +192,7 @@ Prefix: `DISCORD_COMMAND_PREFIX` (default `alfred-identity-`).
 
 **Group restrictions:** on the web admin **Groups** tab, you can limit which Discord users may run `/sso` or `/whoami`. When any group enables a command restriction, only members of groups granted that command can use it. Bootstrap admins and the configured admin role bypass restrictions.
 
-**Default group:** migration seeds a **Default** group (`web_role=readonly`). Users with no other group membership are auto-assigned to it when they run a Discord slash command (`/sso`, `/whoami`) or sign in to the web UI. Admins can change its web role / Discord command grants on the Groups tab; renaming or deleting it will recreate a Default on next daemon start if missing.
+**Default group:** migration seeds a system **Default** group that cannot be deleted. It grants Discord `/sso` and `/whoami` only (no web UI login). Users with no other group membership are auto-assigned to it when they run a Discord slash command (`/sso`, `/whoami`) or sign in to the web UI. Name and base permissions are locked; membership and linked accounts remain editable.
 
 EQ accounts, aliases, tags, characters, groups, and user access are managed in **Alfred Identity** or **Alfred Identity Management** — not via Discord (except SSO tokens).
 

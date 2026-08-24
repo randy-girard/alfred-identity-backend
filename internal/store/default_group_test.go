@@ -24,6 +24,27 @@ func TestEnsureDefaultGroupAndAssign(t *testing.T) {
 		t.Fatalf("find Default: %d ok=%v err=%v", found, ok, err)
 	}
 
+	details, err := st.ListGroupDetails(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var def *store.GroupDetail
+	for i := range details {
+		if details[i].ID == gid {
+			def = &details[i]
+			break
+		}
+	}
+	if def == nil || !def.IsDefault {
+		t.Fatalf("expected is_default detail: %#v", def)
+	}
+	if def.WebRole != "" {
+		t.Fatalf("web_role=%q want empty", def.WebRole)
+	}
+	if len(def.DiscordCommands) != 2 || def.DiscordCommands[0] != "sso" || def.DiscordCommands[1] != "whoami" {
+		t.Fatalf("discord_commands=%v", def.DiscordCommands)
+	}
+
 	u, err := st.UpsertUser(ctx, "def-"+randHex(4), "NoGroups", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -39,8 +60,19 @@ func TestEnsureDefaultGroupAndAssign(t *testing.T) {
 		t.Fatalf("name=%v", groups[0]["name"])
 	}
 	role, err := st.HighestWebRoleForUser(ctx, u)
-	if err != nil || role != "readonly" {
-		t.Fatalf("web role=%q err=%v", role, err)
+	if err != nil || role != "" {
+		t.Fatalf("web role=%q err=%v (Default must not grant web UI)", role, err)
+	}
+	okCmd, err := st.UserCanUseDiscordCommand(ctx, u, "sso")
+	if err != nil || !okCmd {
+		t.Fatalf("Default should grant sso: ok=%v err=%v", okCmd, err)
+	}
+
+	if err := st.DeleteGroup(ctx, gid); err == nil {
+		t.Fatal("expected delete of Default to fail")
+	}
+	if _, err := st.CreateGroup(ctx, "Default", "", "admin", nil); err == nil {
+		t.Fatal("expected create with reserved name to fail")
 	}
 
 	// Already in Default — second call is a no-op.
@@ -69,5 +101,25 @@ func TestEnsureDefaultGroupAndAssign(t *testing.T) {
 	}
 	if groups[0]["name"] == store.DefaultGroupName {
 		t.Fatal("should not replace existing group with Default")
+	}
+
+	// Locked base perms survive UpdateGroupMeta attempts.
+	if err := st.UpdateGroupMeta(ctx, gid, "Renamed", "kept desc", "admin", nil); err != nil {
+		t.Fatal(err)
+	}
+	details, err = st.ListGroupDetails(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, g := range details {
+		if g.ID != gid {
+			continue
+		}
+		if g.Name != store.DefaultGroupName || g.WebRole != "" || len(g.DiscordCommands) != 2 {
+			t.Fatalf("locked fields mutated: %#v", g)
+		}
+		if g.Description != "kept desc" {
+			t.Fatalf("description should update: %q", g.Description)
+		}
 	}
 }
