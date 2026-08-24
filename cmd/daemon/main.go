@@ -81,6 +81,10 @@ func main() {
 	}
 
 	st := &store.Store{DB: sqlDB, AEAD: aead, Key: cfg.DataEncryptionKey}
+	if _, err := st.EnsureDefaultGroup(ctx); err != nil {
+		logger.Error("default group", "err", err)
+		os.Exit(1)
+	}
 	pres := presence.New(cfg.PresenceTTL)
 	hub := &sso.Hub{
 		Store:             st,

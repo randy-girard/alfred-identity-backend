@@ -313,6 +313,11 @@ func (b *Bot) onInteraction(s *discordgo.Session, i *discordgo.InteractionCreate
 		b.respondErr(s, i, "Database error while loading your user.")
 		return
 	}
+	if err := b.Store.EnsureUserInDefaultGroupIfNone(ctx, u); err != nil {
+		b.Log.Error("default group assign", "err", err, "user_id", u.ID)
+		b.respondErr(s, i, "Database error while assigning your group.")
+		return
+	}
 
 	cmdKey := strings.TrimPrefix(data.Name, b.Cfg.DiscordCommandPrefix)
 	if !b.userIsDiscordAdmin(u) {

@@ -553,6 +553,52 @@ func (s *Store) HighestWebRoleForUser(ctx context.Context, u User) (string, erro
 	return highest, nil
 }
 
+// DefaultGroupName is the built-in group auto-assigned when a user has no membership.
+const DefaultGroupName = "Default"
+
+// EnsureDefaultGroup returns the Default group id, creating it if missing.
+func (s *Store) EnsureDefaultGroup(ctx context.Context) (int64, error) {
+	if id, ok, err := s.FindGroupIDByName(ctx, DefaultGroupName); err != nil {
+		return 0, err
+	} else if ok {
+		return id, nil
+	}
+	id, err := s.CreateGroup(ctx,
+		DefaultGroupName,
+		"Auto-assigned when a user has no other group (SSO slash command or first web login).",
+		"readonly",
+		nil,
+	)
+	if err != nil {
+		// Race: another process may have created it.
+		if id2, ok, err2 := s.FindGroupIDByName(ctx, DefaultGroupName); err2 == nil && ok {
+			return id2, nil
+		}
+		return 0, err
+	}
+	return id, nil
+}
+
+// EnsureUserInDefaultGroupIfNone adds the user to Default when they have no groups
+// (neither direct membership nor Discord-role group grants).
+func (s *Store) EnsureUserInDefaultGroupIfNone(ctx context.Context, u User) error {
+	if u.ID <= 0 {
+		return nil
+	}
+	groups, err := s.ListGroupsForUser(ctx, u)
+	if err != nil {
+		return err
+	}
+	if len(groups) > 0 {
+		return nil
+	}
+	gid, err := s.EnsureDefaultGroup(ctx)
+	if err != nil {
+		return err
+	}
+	return s.AddGroupUser(ctx, gid, u.ID)
+}
+
 func (s *Store) AddGroupUser(ctx context.Context, groupID, userID int64) error {
 	_, err := s.DB.ExecContext(ctx, `INSERT INTO group_members (group_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, groupID, userID)
 	return err

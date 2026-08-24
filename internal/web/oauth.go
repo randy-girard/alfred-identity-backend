@@ -88,6 +88,11 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+	if err := s.store.EnsureUserInDefaultGroupIfNone(ctx, u); err != nil {
+		s.log.Error("oauth default group", "err", err, "user_id", u.ID)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
 	if u.AccessRevoked {
 		s.clearSessionCookie(w)
 		http.Redirect(w, r, BasePath+"/denied?reason=revoked", http.StatusFound)

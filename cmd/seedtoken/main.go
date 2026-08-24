@@ -43,6 +43,9 @@ func main() {
 	if err != nil {
 		fatal(err)
 	}
+	if err := st.EnsureUserInDefaultGroupIfNone(ctx, u); err != nil {
+		fatal(err)
+	}
 	raw, id, err := st.CreateToken(ctx, u.ID)
 	if err != nil {
 		fatal(err)
