@@ -59,4 +59,12 @@ func TestHubAdminCannotMutatePrivateShare(t *testing.T) {
 		t.Fatalf("remove share: %#v", resp)
 	}
 
+	writeWS(t, ctx, conn, map[string]any{
+		"type": "admin_set_user_roles", "request_id": "p3",
+		"user_id": owner.ID, "role_ids": []string{"admin-role"},
+	})
+	resp = readWSUntil(t, ctx, conn, "admin_result")
+	if resp["ok"] != false || resp["error"] != "roles_managed_by_discord" {
+		t.Fatalf("set roles: %#v", resp)
+	}
 }

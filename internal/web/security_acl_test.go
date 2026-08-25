@@ -102,3 +102,38 @@ func TestReadonlyStateOmitsAdminFields(t *testing.T) {
 	}
 }
 
+func TestWebSetUserRolesForbidden(t *testing.T) {
+	st := openTestStoreForWeb(t)
+	ctx := context.Background()
+	admin, err := st.UpsertUser(ctx, "role-admin-"+testRandHex(4), "Admin", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := st.UpsertUser(ctx, "role-target-"+testRandHex(4), "Target", []string{"guild-role"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := New(Options{
+		Store:             st,
+		SessionKey:        []byte("test-session-key-32-bytes-long!!"),
+		PublicURL:         "http://127.0.0.1:8181",
+		BootstrapAdminIDs: []string{admin.DiscordID},
+		AdminRoleID:       "discord-admin-role",
+	})
+	body, _ := json.Marshal(map[string]any{"role_ids": []string{"discord-admin-role"}})
+	rr := httptest.NewRecorder()
+	s.handleUsers(rr, adminReq(admin, http.MethodPut, BasePath+"/api/users/"+strconv.FormatInt(target.ID, 10)+"/roles", body))
+	if rr.Code != http.StatusForbidden || !strings.Contains(rr.Body.String(), "roles_managed_by_discord") {
+		t.Fatalf("set roles: %d %s", rr.Code, rr.Body.String())
+	}
+	u, err := st.UserByID(ctx, target.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range u.RoleIDs {
+		if r == "discord-admin-role" {
+			t.Fatal("roles must not change")
+		}
+	}
+}
+

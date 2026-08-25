@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/alfred-identity/web/internal/store"
@@ -67,7 +68,7 @@ func TestHandleGroupsAndUsersAPI(t *testing.T) {
 	rolesBody, _ := json.Marshal(map[string]any{"role_ids": []string{"guild-role", "extra-role"}})
 	rr = httptest.NewRecorder()
 	s.handleUsers(rr, adminReq(admin, http.MethodPut, BasePath+"/api/users/"+strconv.FormatInt(target.ID, 10)+"/roles", rolesBody))
-	if rr.Code != http.StatusOK {
+	if rr.Code != http.StatusForbidden || !strings.Contains(rr.Body.String(), "roles_managed_by_discord") {
 		t.Fatalf("set roles: %d %s", rr.Code, rr.Body.String())
 	}
 

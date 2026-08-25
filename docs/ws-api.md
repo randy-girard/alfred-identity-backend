@@ -82,11 +82,19 @@ Deletes the EQ account and cascading aliases/tags/characters. Broadcasts `full_s
 ```
 When `revoked` is true, active tokens are revoked and WS sessions for that user are closed. The user row is kept; new token creation is rejected until access is restored.
 
-### `admin_set_user_roles` (admin only)
+### `admin_set_user_roles` (admin only) — disabled
 ```json
 { "type": "admin_set_user_roles", "request_id": "uuid", "user_id": 1, "role_ids": ["discord-role-id"] }
 ```
-Replaces the user's cached Discord role IDs (same field Discord resync writes).
+Always returns `roles_managed_by_discord`. Discord roles are synced from Discord (bot / OAuth) only so website/group admins cannot mint `DISCORD_ADMIN_ROLE_ID`.
+
+### Private shares (`restricted=true`)
+
+Guild admins may manage **non-restricted** guild accounts. For private Local → Share accounts:
+
+- Password / access grant changes via `admin_update_account` → `share_password_managed_in_gui` / `share_access_managed_in_gui`
+- Delete / disable / alias / tag / character mutations require `owner_user_id` match; otherwise `share_not_owner`
+- Owners manage shares via `share_account` / `unshare_account`
 
 After a successful admin mutation, the daemon **broadcasts** a fresh `full_state` to every connected client (each payload is ACL-filtered for that user). Admins also receive an `admin` object:
 

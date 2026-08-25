@@ -549,24 +549,10 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 		s.hub.BroadcastFullState()
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	case "roles":
-		if r.Method != http.MethodPut {
-			writeErr(w, http.StatusMethodNotAllowed, "method_not_allowed")
-			return
-		}
-		var body struct {
-			RoleIDs []string `json:"role_ids"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			writeErr(w, http.StatusBadRequest, "bad_request")
-			return
-		}
-		if err := s.store.SetUserRoles(ctx, userID, body.RoleIDs); err != nil {
-			writeErr(w, http.StatusInternalServerError, "internal")
-			return
-		}
-		s.store.Audit(ctx, actor.ID, "web_set_user_roles", "user="+strconv.FormatInt(userID, 10))
-		s.hub.BroadcastFullState()
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		// Discord roles are synced from Discord only (bot / OAuth). Manual edits
+		// could mint DISCORD_ADMIN_ROLE_ID for group-granted web admins.
+		writeErr(w, http.StatusForbidden, "roles_managed_by_discord")
+		return
 	default:
 		writeErr(w, http.StatusNotFound, "not_found")
 	}

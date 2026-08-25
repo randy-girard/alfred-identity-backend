@@ -819,29 +819,9 @@ func (h *Hub) handleAdmin(ctx context.Context, c *websocket.Conn, client *wsClie
 		h.broadcastFullState()
 
 	case "admin_set_user_roles":
-		var msg struct {
-			RequestID string   `json:"request_id"`
-			UserID    int64    `json:"user_id"`
-			RoleIDs   []string `json:"role_ids"`
-		}
-		if err := json.Unmarshal(data, &msg); err != nil {
-			fail("bad_request")
-			return
-		}
-		if msg.UserID <= 0 {
-			fail("invalid_user")
-			return
-		}
-		if err := h.Store.SetUserRoles(ctx, msg.UserID, msg.RoleIDs); err != nil {
-			h.Log.Error("admin_set_user_roles", "err", err)
-			fail("internal")
-			return
-		}
-		h.Store.Audit(ctx, user.ID, "admin_set_user_roles", fmt.Sprintf("user=%d roles=%d", msg.UserID, len(msg.RoleIDs)))
-		_ = writeJSON(ctx, c, client, map[string]any{
-			"type": "admin_result", "request_id": reqID, "ok": true, "user_id": msg.UserID,
-		})
-		h.broadcastFullState()
+		// Discord roles sync from Discord only; manual WS edits could mint admin.
+		fail("roles_managed_by_discord")
+		return
 	}
 }
 
