@@ -28,6 +28,7 @@ type Config struct {
 	WebPublicURL           string
 	WebAccessRoleID        string // empty → DiscordAdminRoleID
 	WebSSOSourceName       string // display name in Discord /sso get JSON and /sso-source.json (SSO_SOURCE_NAME or WEB_SSO_SOURCE_NAME)
+	WebSessionKey          []byte // optional; when empty, derived from DataEncryptionKey via HKDF
 	PresenceTTL            time.Duration
 	LoginAuthRatePerMin    int
 	RequireAccountACL      bool // when true, empty grants on non-restricted accounts are rejected
@@ -70,6 +71,16 @@ func Load() (Config, error) {
 		PresenceTTL:            time.Duration(envInt("PRESENCE_TTL_SECONDS", 90)) * time.Second,
 		LoginAuthRatePerMin:    envInt("LOGIN_AUTH_RATE_LIMIT_PER_MIN", 30),
 		RequireAccountACL:      envBool("REQUIRE_ACCOUNT_ACL", false),
+	}
+	if sk := strings.TrimSpace(os.Getenv("WEB_SESSION_KEY")); sk != "" {
+		raw, err := base64.StdEncoding.DecodeString(sk)
+		if err != nil {
+			return Config{}, fmt.Errorf("WEB_SESSION_KEY: %w", err)
+		}
+		if len(raw) < 16 {
+			return Config{}, fmt.Errorf("WEB_SESSION_KEY must decode to at least 16 bytes")
+		}
+		cfg.WebSessionKey = raw
 	}
 	if cfg.DiscordEnabled && cfg.DiscordToken == "" {
 		return Config{}, fmt.Errorf("DISCORD_TOKEN required when DISCORD_ENABLED=true")

@@ -135,12 +135,21 @@ func main() {
 	}
 
 	if cfg.WebEnabled {
+		sessionKey := cfg.WebSessionKey
+		if len(sessionKey) == 0 {
+			derived, derr := crypto.DeriveKey(cfg.DataEncryptionKey, "web-session")
+			if derr != nil {
+				logger.Error("derive web session key", "err", derr)
+				os.Exit(1)
+			}
+			sessionKey = derived
+		}
 		webSrv := web.New(web.Options{
 			Store:             st,
 			Hub:               hub,
 			Presence:          pres,
 			Log:               logger,
-			SessionKey:        cfg.DataEncryptionKey,
+			SessionKey:        sessionKey,
 			PublicURL:         cfg.WebPublicURL,
 			ClientID:          cfg.DiscordClientID,
 			ClientSecret:      cfg.DiscordClientSecret,
@@ -149,6 +158,7 @@ func main() {
 			BootstrapAdminIDs: cfg.DiscordBootstrapAdmins,
 			AdminRoleID:       cfg.DiscordAdminRoleID,
 			SSOSourceName:     cfg.WebSSOSourceName,
+			RequireAccountACL: cfg.RequireAccountACL,
 		})
 		webSrv.Mount(mux)
 		logger.Info("web admin enabled",
