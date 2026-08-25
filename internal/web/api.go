@@ -153,18 +153,21 @@ func (s *Server) handleAccountsExport(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
 	u := currentUser(r)
+	includePasswords := r.URL.Query().Get("include_passwords") == "1"
 
 	var buf strings.Builder
-	n, err := s.exportSSOAccountsCSV(ctx, &buf)
+	n, err := s.exportSSOAccountsCSV(ctx, &buf, includePasswords)
 	if err != nil {
-		s.log.Error("web export accounts csv", "err", err)
-		writeErr(w, http.StatusInternalServerError, "export_failed")
+		s.log.Error("web export csv", "err", err)
+		writeErr(w, http.StatusInternalServerError, "internal")
 		return
 	}
-	s.store.Audit(ctx, u.ID, "web_export_accounts", fmt.Sprintf("rows=%d", n))
+	s.store.Audit(ctx, u.ID, "web_export_accounts",
+		fmt.Sprintf("rows=%d include_passwords=%v", n, includePasswords))
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
-	w.Header().Set("Content-Disposition", `attachment; filename="alfred-sso-accounts.csv"`)
-	_, _ = io.WriteString(w, buf.String())
+	w.Header().Set("Content-Disposition", `attachment; filename="sso-accounts.csv"`)
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write([]byte(buf.String()))
 }
 
 func (s *Server) handleAccountsImport(w http.ResponseWriter, r *http.Request) {
@@ -885,16 +888,18 @@ func (s *Server) handleSettingsBackup(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
 		defer cancel()
-		bak, err := s.exportConfigBackup(ctx)
+		includePasswords := r.URL.Query().Get("include_passwords") == "1"
+		bak, err := s.exportConfigBackup(ctx, includePasswords)
 		if err != nil {
 			s.log.Error("export config backup", "err", err)
 			writeErr(w, http.StatusInternalServerError, "export_failed")
 			return
 		}
 		s.store.Audit(ctx, u.ID, "web_export_config",
-			fmt.Sprintf("users=%d groups=%d accounts=%d", len(bak.Users), len(bak.Groups), len(bak.Accounts)))
+			fmt.Sprintf("users=%d groups=%d accounts=%d include_passwords=%v", len(bak.Users), len(bak.Groups), len(bak.Accounts), includePasswords))
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.Header().Set("Content-Disposition", `attachment; filename="alfred-identity-config.json"`)
+		w.Header().Set("Cache-Control", "no-store")
 		enc := json.NewEncoder(w)
 		enc.SetIndent("", "  ")
 		_ = enc.Encode(bak)

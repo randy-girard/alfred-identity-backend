@@ -66,7 +66,7 @@ type ConfigImportResult struct {
 	Errors          []string `json:"errors"`
 }
 
-func (s *Server) exportConfigBackup(ctx context.Context) (ConfigBackup, error) {
+func (s *Server) exportConfigBackup(ctx context.Context, includePasswords bool) (ConfigBackup, error) {
 	out := ConfigBackup{
 		Version:    configBackupVersion,
 		ExportedAt: time.Now().UTC(),
@@ -106,9 +106,14 @@ func (s *Server) exportConfigBackup(ctx context.Context) (ConfigBackup, error) {
 	acctNameByID := map[int64]string{}
 	for _, m := range metas {
 		acctNameByID[m.ID] = m.Username
-		username, password, err := s.store.DecryptCredentialsAny(ctx, m.ID)
-		if err != nil {
-			return out, fmt.Errorf("account %d: %w", m.ID, err)
+		username := m.Username
+		password := ""
+		if includePasswords {
+			u, p, err := s.store.DecryptCredentialsAny(ctx, m.ID)
+			if err != nil {
+				continue
+			}
+			username, password = u, p
 		}
 		row := ConfigBackupAccount{
 			Username:               username,

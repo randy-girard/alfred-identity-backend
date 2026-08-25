@@ -1480,7 +1480,11 @@ function bindAccounts(root) {
   })
   root.querySelector('#export-csv')?.addEventListener('click', () => {
     run(async () => {
-      const res = await fetch('/admin/api/accounts/export', { credentials: 'same-origin' })
+      const includePasswords = confirm(
+        'Include EQ account passwords in the CSV?\n\nTreat the downloaded file like a password vault. Choose Cancel for usernames and metadata only.',
+      )
+      const q = includePasswords ? '?include_passwords=1' : ''
+      const res = await fetch('/admin/api/accounts/export' + q, { credentials: 'same-origin' })
       if (res.status === 401) {
         location.href = '/admin/login'
         return
@@ -2289,7 +2293,11 @@ function bindSettings(root) {
   root.querySelector('#export-config')?.addEventListener('click', () => {
     if (!isWebAdmin()) return
     run(async () => {
-      const res = await fetch('/admin/api/settings/backup', { credentials: 'same-origin' })
+      const includePasswords = confirm(
+        'Include EQ account passwords in the backup JSON?\n\nNeeded for a full restore on a new host. Choose Cancel to omit passwords (safer to store or share the file).',
+      )
+      const q = includePasswords ? '?include_passwords=1' : ''
+      const res = await fetch('/admin/api/settings/backup' + q, { credentials: 'same-origin' })
       if (res.status === 401) {
         location.href = '/admin/login'
         return

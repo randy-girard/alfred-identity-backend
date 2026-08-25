@@ -137,6 +137,55 @@ func TestWebSetUserRolesForbidden(t *testing.T) {
 	}
 }
 
+func TestExportOmitsPasswordsByDefault(t *testing.T) {
+	st := openTestStoreForWeb(t)
+	ctx := context.Background()
+	admin, err := st.UpsertUser(ctx, "exp-"+testRandHex(4), "Admin", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uname := "exppw_" + testRandHex(5)
+	if _, err := st.AddEQAccount(ctx, uname, "super-secret", ""); err != nil {
+		t.Fatal(err)
+	}
+	s := New(Options{
+		Store:             st,
+		SessionKey:        []byte("test-session-key-32-bytes-long!!"),
+		PublicURL:         "http://127.0.0.1:8181",
+		BootstrapAdminIDs: []string{admin.DiscordID},
+	})
+
+	rr := httptest.NewRecorder()
+	s.handleAccountsExport(rr, adminReq(admin, http.MethodGet, BasePath+"/api/accounts/export", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("export: %d %s", rr.Code, rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "super-secret") {
+		t.Fatal("default CSV export must omit passwords")
+	}
+
+	rr = httptest.NewRecorder()
+	s.handleAccountsExport(rr, adminReq(admin, http.MethodGet, BasePath+"/api/accounts/export?include_passwords=1", nil))
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "super-secret") {
+		t.Fatalf("password export: %d %s", rr.Code, rr.Body.String())
+	}
+
+	rr = httptest.NewRecorder()
+	s.handleSettingsBackup(rr, adminReq(admin, http.MethodGet, BasePath+"/api/settings/backup", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("backup: %d %s", rr.Code, rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "super-secret") {
+		t.Fatal("default backup must omit passwords")
+	}
+
+	rr = httptest.NewRecorder()
+	s.handleSettingsBackup(rr, adminReq(admin, http.MethodGet, BasePath+"/api/settings/backup?include_passwords=1", nil))
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "super-secret") {
+		t.Fatalf("password backup: %d %s", rr.Code, rr.Body.String())
+	}
+}
+
 func TestRequireAccountACLRejectsEmptyGrants(t *testing.T) {
 	st := openTestStoreForWeb(t)
 	ctx := context.Background()
@@ -162,4 +211,3 @@ func TestRequireAccountACLRejectsEmptyGrants(t *testing.T) {
 		t.Fatalf("empty ACL: %d %s", rr.Code, rr.Body.String())
 	}
 }
-

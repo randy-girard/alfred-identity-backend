@@ -231,7 +231,8 @@ func roleLabel(roleID string, roles []store.DiscordRole) string {
 
 // exportSSOAccountsCSV writes username,password,role,aliases,tags,characters rows
 // matching the import format. Skips restricted (private share) accounts.
-func (s *Server) exportSSOAccountsCSV(ctx context.Context, w io.Writer) (int, error) {
+// When includePasswords is false, the password column is left blank.
+func (s *Server) exportSSOAccountsCSV(ctx context.Context, w io.Writer, includePasswords bool) (int, error) {
 	metas, err := s.store.ListEQAccountMetas(ctx, nil, true)
 	if err != nil {
 		return 0, err
@@ -249,9 +250,15 @@ func (s *Server) exportSSOAccountsCSV(ctx context.Context, w io.Writer) (int, er
 		if m.Restricted {
 			continue
 		}
-		username, password, err := s.store.DecryptCredentialsAny(ctx, m.ID)
-		if err != nil {
-			return n, fmt.Errorf("account %d: %w", m.ID, err)
+		username := m.Username
+		password := ""
+		if includePasswords {
+			u, p, err := s.store.DecryptCredentialsAny(ctx, m.ID)
+			if err != nil {
+				// Skip rows sealed under another key (or corrupt); do not abort the whole export.
+				continue
+			}
+			username, password = u, p
 		}
 		role := ""
 		if len(m.RequiredRoleIDs) > 0 {
