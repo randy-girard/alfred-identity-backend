@@ -37,9 +37,15 @@ If you previously registered `/web/oauth/callback`, update the Discord OAuth2 re
 - Login is Discord OAuth only (no passwords).
 - Access requires guild membership **and** either:
   - the `WEB_ACCESS_ROLE_ID` / `DISCORD_ADMIN_ROLE_ID` Discord role, or
+  - membership in an access group with `web_role` of `admin` or `readonly`, or
   - a bootstrap admin snowflake.
 - Revoked SSO users (`access_revoked`) cannot use the web UI.
 - Every `/admin/api/*` request and `/admin/ws` re-checks roles from the database.
+- **Read-only** users receive filtered `/admin/api/state` (accounts/shares they may see, filtered presence). Admin-only fields (`users`, `roles`, full `groups`, `connections`, audit) and the Users / Groups / Connections / Audit tabs are omitted.
+- Discord role caches are **not** editable in the web UI or via SSO admin WS; they sync from Discord.
+- Empty account access grants mean **all** authenticated SSO users can log in and receive that account’s password. The UI confirms before saving empty grants. Optional: set `REQUIRE_ACCOUNT_ACL=true` to reject empty grants on the web API.
+- CSV / config exports omit passwords unless `?include_passwords=1` (UI prompts first). Treat export files like password vaults.
+- Session cookies are signed with `WEB_SESSION_KEY` when set, otherwise an HKDF-derived key from `DATA_ENCRYPTION_KEY` (`info=web-session`). Changing the session key logs everyone out without re-encrypting the database.
 
 ## Live updates
 
@@ -54,7 +60,7 @@ Mutations go through the same store as the SSO WebSocket admin API and call `Bro
 |-----|---------|
 | Overview | High-level counts (accounts, users, groups, shares, live clients/sessions) plus who’s online |
 | Accounts | Add/edit/remove EQ accounts; access via Discord role, user, and/or access groups (OR); aliases/tags/characters; CSV import |
-| Users | Revoke/restore access, edit Discord role grants cached for SSO |
+| Users | Revoke/restore access and group membership (Discord roles are read-only; synced from Discord) |
 | Groups | Access groups: Discord users + roles; link to EQ accounts for SSO login gating |
 | Shared accounts | Private Local → Share copies: owner, who can use them, edit share list, remove SSO copy |
 | Connections | Live SSO WebSocket clients (Discord user, GUI version, connected duration) |
