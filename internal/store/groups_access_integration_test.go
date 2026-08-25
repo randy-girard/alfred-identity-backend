@@ -84,12 +84,15 @@ func TestGroupAccessAndAdminState(t *testing.T) {
 		t.Fatal("group member should see linked account")
 	}
 
-	fs, err := st.FullStateForUser(ctx, member, []store.OnlineEntry{{AccountID: acct, CharacterName: charName}})
+	fs, err := st.FullStateForUser(ctx, member, []store.OnlineEntry{
+		{AccountID: acct, CharacterName: charName},
+		{AccountID: 999002, CharacterName: "OtherBox"},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(fs.Accounts) == 0 || len(fs.Online) != 1 {
-		t.Fatalf("full state accounts=%d online=%d", len(fs.Accounts), len(fs.Online))
+	if len(fs.Accounts) == 0 || len(fs.Online) != 1 || fs.Online[0].AccountID != acct {
+		t.Fatalf("full state accounts=%d online=%#v", len(fs.Accounts), fs.Online)
 	}
 
 	adminState, err := st.AdminState(ctx)

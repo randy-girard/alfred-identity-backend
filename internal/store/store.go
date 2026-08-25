@@ -1614,7 +1614,17 @@ func (s *Store) FullStateForUser(ctx context.Context, u User, online []OnlineEnt
 	if err != nil {
 		return FullState{}, err
 	}
-	fs := FullState{Accounts: []EQAccountMeta{}, Online: online}
+	allowed := make(map[int64]struct{}, len(ids))
+	for _, id := range ids {
+		allowed[id] = struct{}{}
+	}
+	filteredOnline := make([]OnlineEntry, 0, len(online))
+	for _, e := range online {
+		if _, ok := allowed[e.AccountID]; ok {
+			filteredOnline = append(filteredOnline, e)
+		}
+	}
+	fs := FullState{Accounts: []EQAccountMeta{}, Online: filteredOnline}
 	if len(ids) == 0 {
 		return fs, nil
 	}
