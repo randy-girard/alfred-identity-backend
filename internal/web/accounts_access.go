@@ -80,25 +80,19 @@ func (s *Server) webVisibleShares(ctx context.Context, u store.User) ([]store.EQ
 // rejectRestrictedAccountManage blocks web mutations on private shares unless the actor owns the share.
 // Access grants and passwords on restricted accounts are always rejected (managed in the desktop GUI).
 func (s *Server) rejectRestrictedAccountManage(w http.ResponseWriter, ctx context.Context, accountID int64, u store.User, setAccess, setPassword bool) bool {
-	meta, err := s.store.LoadEQAccountMeta(ctx, accountID)
-	if err != nil {
-		writeErr(w, http.StatusNotFound, "not_found")
-		return true
-	}
-	if !meta.Restricted {
+	err := s.store.CheckRestrictedAccountManage(ctx, accountID, u.ID, setAccess, setPassword)
+	if err == nil {
 		return false
 	}
-	if setAccess {
+	switch err {
+	case store.ErrShareAccessManagedInGUI:
 		writeErr(w, http.StatusForbidden, "share_access_managed_in_gui")
-		return true
-	}
-	if setPassword {
+	case store.ErrSharePasswordManagedInGUI:
 		writeErr(w, http.StatusForbidden, "share_password_managed_in_gui")
-		return true
-	}
-	if meta.OwnerUserID != u.ID {
+	case store.ErrShareNotOwner:
 		writeErr(w, http.StatusForbidden, "share_not_owner")
-		return true
+	default:
+		writeErr(w, http.StatusNotFound, "not_found")
 	}
-	return false
+	return true
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -12,11 +13,11 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/coder/websocket"
-	"github.com/google/uuid"
 	"github.com/alfred-identity/web/internal/crypto"
 	"github.com/alfred-identity/web/internal/presence"
 	"github.com/alfred-identity/web/internal/store"
+	"github.com/coder/websocket"
+	"github.com/google/uuid"
 	"golang.org/x/time/rate"
 )
 
@@ -421,6 +422,23 @@ func (h *Hub) handleAdmin(ctx context.Context, c *websocket.Conn, client *wsClie
 		fail("rate_limited")
 		return
 	}
+	rejectRestricted := func(accountID int64, setAccess, setPassword bool) bool {
+		err := h.Store.CheckRestrictedAccountManage(ctx, accountID, user.ID, setAccess, setPassword)
+		if err == nil {
+			return false
+		}
+		switch {
+		case errors.Is(err, store.ErrShareAccessManagedInGUI):
+			fail("share_access_managed_in_gui")
+		case errors.Is(err, store.ErrSharePasswordManagedInGUI):
+			fail("share_password_managed_in_gui")
+		case errors.Is(err, store.ErrShareNotOwner):
+			fail("share_not_owner")
+		default:
+			fail("not_found")
+		}
+		return true
+	}
 
 	switch typ {
 	case "admin_add_account":
@@ -479,6 +497,11 @@ func (h *Hub) handleAdmin(ctx context.Context, c *websocket.Conn, client *wsClie
 		}
 		if msg.AccountID <= 0 {
 			fail("invalid_account")
+			return
+		}
+		setPassword := msg.Password != nil && strings.TrimSpace(*msg.Password) != ""
+		setAccess := msg.RequiredRoleID != nil
+		if rejectRestricted(msg.AccountID, setAccess, setPassword) {
 			return
 		}
 		changed := false
@@ -543,6 +566,9 @@ func (h *Hub) handleAdmin(ctx context.Context, c *websocket.Conn, client *wsClie
 			fail("invalid_account")
 			return
 		}
+		if rejectRestricted(msg.AccountID, false, false) {
+			return
+		}
 		if err := h.Store.AddAlias(ctx, alias, msg.AccountID); err != nil {
 			h.Log.Error("admin_add_alias", "err", err)
 			msg := err.Error()
@@ -578,6 +604,9 @@ func (h *Hub) handleAdmin(ctx context.Context, c *websocket.Conn, client *wsClie
 			fail("invalid_account")
 			return
 		}
+		if rejectRestricted(msg.AccountID, false, false) {
+			return
+		}
 		if err := h.Store.AddTag(ctx, tag, msg.AccountID); err != nil {
 			h.Log.Error("admin_add_tag", "err", err)
 			fail("internal")
@@ -606,6 +635,9 @@ func (h *Hub) handleAdmin(ctx context.Context, c *websocket.Conn, client *wsClie
 		}
 		if msg.AccountID <= 0 {
 			fail("invalid_account")
+			return
+		}
+		if rejectRestricted(msg.AccountID, false, false) {
 			return
 		}
 		if err := h.Store.RemoveAlias(ctx, alias, msg.AccountID); err != nil {
@@ -642,6 +674,9 @@ func (h *Hub) handleAdmin(ctx context.Context, c *websocket.Conn, client *wsClie
 			fail("invalid_account")
 			return
 		}
+		if rejectRestricted(msg.AccountID, false, false) {
+			return
+		}
 		if err := h.Store.RemoveTag(ctx, tag, msg.AccountID); err != nil {
 			h.Log.Error("admin_remove_tag", "err", err)
 			if strings.Contains(err.Error(), "not found") {
@@ -676,6 +711,9 @@ func (h *Hub) handleAdmin(ctx context.Context, c *websocket.Conn, client *wsClie
 			fail("invalid_account")
 			return
 		}
+		if rejectRestricted(msg.AccountID, false, false) {
+			return
+		}
 		if err := h.Store.AddCharacter(ctx, name, msg.AccountID); err != nil {
 			h.Log.Error("admin_add_character", "err", err)
 			fail("internal")
@@ -700,6 +738,9 @@ func (h *Hub) handleAdmin(ctx context.Context, c *websocket.Conn, client *wsClie
 		name := strings.TrimSpace(msg.Name)
 		if name == "" || msg.AccountID <= 0 {
 			fail("invalid_character")
+			return
+		}
+		if rejectRestricted(msg.AccountID, false, false) {
 			return
 		}
 		if err := h.Store.RemoveCharacter(ctx, name, msg.AccountID); err != nil {
@@ -728,6 +769,9 @@ func (h *Hub) handleAdmin(ctx context.Context, c *websocket.Conn, client *wsClie
 		}
 		if msg.AccountID <= 0 {
 			fail("invalid_account")
+			return
+		}
+		if rejectRestricted(msg.AccountID, false, false) {
 			return
 		}
 		if err := h.Store.DeleteEQAccount(ctx, msg.AccountID); err != nil {
