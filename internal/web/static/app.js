@@ -1,16 +1,20 @@
-const TABS = [
+const ALL_TABS = [
   { id: 'overview', label: 'Overview' },
   { id: 'accounts', label: 'Accounts' },
-  { id: 'users', label: 'Users' },
-  { id: 'groups', label: 'Groups' },
+  { id: 'users', label: 'Users', adminOnly: true },
+  { id: 'groups', label: 'Groups', adminOnly: true },
   { id: 'shares', label: 'Shared accounts' },
-  { id: 'connections', label: 'Connections' },
+  { id: 'connections', label: 'Connections', adminOnly: true },
   { id: 'sessions', label: 'Sessions' },
-  { id: 'audit', label: 'Audit log' },
+  { id: 'audit', label: 'Audit log', adminOnly: true },
   { id: 'settings', label: 'Settings' },
 ]
 
-const TAB_IDS = new Set(TABS.map((t) => t.id))
+function visibleTabs() {
+  return ALL_TABS.filter((t) => !t.adminOnly || isWebAdmin())
+}
+
+const TAB_IDS = new Set(ALL_TABS.map((t) => t.id))
 
 function tabFromLocation() {
   const raw = (location.pathname || '').replace(/^\/admin\/?/, '').replace(/\/+$/, '')
@@ -343,7 +347,7 @@ function modal(title, bodyHTML, onSubmit) {
 }
 
 function renderTabs() {
-  $('#tabs').innerHTML = TABS.map((t) => `
+  $('#tabs').innerHTML = visibleTabs().map((t) => `
     <button type="button" class="tab ${tab === t.id ? 'active' : ''}" data-tab="${t.id}">${esc(t.label)}</button>
   `).join('')
   $('#tabs').querySelectorAll('[data-tab]').forEach((btn) => {
@@ -353,6 +357,7 @@ function renderTabs() {
 
 function goTab(id) {
   if (!TAB_IDS.has(id)) id = 'overview'
+  if (!visibleTabs().some((t) => t.id === id)) id = 'overview'
   if (tab === id) {
     syncTabToURL(true)
     return

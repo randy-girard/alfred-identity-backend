@@ -35,6 +35,7 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) buildState(ctx context.Context, u store.User) (map[string]any, error) {
+	isAdmin := s.isWebAdmin(ctx, u)
 	accounts, err := s.webVisibleAccounts(ctx, u)
 	if err != nil {
 		return nil, err
@@ -43,15 +44,32 @@ func (s *Server) buildState(ctx context.Context, u store.User) (map[string]any, 
 	if err != nil {
 		return nil, err
 	}
-	admin, err := s.store.AdminState(ctx)
-	if err != nil {
-		return nil, err
+	visibleIDs := make(map[int64]struct{}, len(accounts)+len(shares))
+	for _, a := range accounts {
+		visibleIDs[a.ID] = struct{}{}
 	}
+	for _, a := range shares {
+		visibleIDs[a.ID] = struct{}{}
+	}
+
 	online := []store.OnlineEntry{}
 	sessions := []map[string]any{}
 	if s.presence != nil {
-		online = s.presence.Online()
+		for _, e := range s.presence.Online() {
+			if isAdmin {
+				online = append(online, e)
+				continue
+			}
+			if _, ok := visibleIDs[e.AccountID]; ok {
+				online = append(online, e)
+			}
+		}
 		for _, e := range s.presence.Snapshot() {
+			if !isAdmin {
+				if _, ok := visibleIDs[e.AccountID]; !ok {
+					continue
+				}
+			}
 			sessions = append(sessions, map[string]any{
 				"account_id":     e.AccountID,
 				"character_name": e.CharacterName,
@@ -60,24 +78,44 @@ func (s *Server) buildState(ctx context.Context, u store.User) (map[string]any, 
 			})
 		}
 	}
+
 	connections := []map[string]any{}
-	if s.hub != nil {
-		for _, c := range s.hub.Connections() {
-			connections = append(connections, map[string]any{
-				"session_id":     c.SessionID,
-				"user_id":        c.UserID,
-				"discord_id":     c.DiscordID,
-				"display_name":   c.DisplayName,
-				"client_version": c.ClientVersion,
-				"connected_at":   c.ConnectedAt.UTC().Format(time.RFC3339),
-				"is_admin":       c.IsAdmin,
-			})
+	users := []store.AdminUser{}
+	roles := []store.DiscordRole{}
+	var groups any = []any{}
+	if isAdmin {
+		admin, err := s.store.AdminState(ctx)
+		if err != nil {
+			return nil, err
+		}
+		users = admin.Users
+		roles = admin.Roles
+		if users == nil {
+			users = []store.AdminUser{}
+		}
+		if roles == nil {
+			roles = []store.DiscordRole{}
+		}
+		groupDetails, err := s.store.ListGroupDetails(ctx)
+		if err != nil {
+			return nil, err
+		}
+		groups = groupDetails
+		if s.hub != nil {
+			for _, c := range s.hub.Connections() {
+				connections = append(connections, map[string]any{
+					"session_id":     c.SessionID,
+					"user_id":        c.UserID,
+					"discord_id":     c.DiscordID,
+					"display_name":   c.DisplayName,
+					"client_version": c.ClientVersion,
+					"connected_at":   c.ConnectedAt.UTC().Format(time.RFC3339),
+					"is_admin":       c.IsAdmin,
+				})
+			}
 		}
 	}
-	groups, err := s.store.ListGroupDetails(ctx)
-	if err != nil {
-		return nil, err
-	}
+
 	return map[string]any{
 		"ok":          true,
 		"accounts":    accounts,
@@ -85,8 +123,8 @@ func (s *Server) buildState(ctx context.Context, u store.User) (map[string]any, 
 		"online":      online,
 		"sessions":    sessions,
 		"connections": connections,
-		"users":       admin.Users,
-		"roles":       admin.Roles,
+		"users":       users,
+		"roles":       roles,
 		"groups":      groups,
 	}, nil
 }

@@ -114,7 +114,7 @@ func (s *Server) Mount(mux *http.ServeMux) {
 	mux.HandleFunc(BasePath+"/api/users/", s.requireAuth(s.handleUsers))
 	mux.HandleFunc(BasePath+"/api/groups", s.requireAuth(s.handleGroups))
 	mux.HandleFunc(BasePath+"/api/groups/", s.requireAuth(s.handleGroupSub))
-	mux.HandleFunc(BasePath+"/api/audit", s.requireAuth(s.handleAudit))
+	mux.HandleFunc(BasePath+"/api/audit", s.requireAdmin(s.handleAudit))
 	mux.HandleFunc(BasePath+"/api/settings/backup", s.requireAdmin(s.handleSettingsBackup))
 
 	mux.HandleFunc(BasePath, func(w http.ResponseWriter, r *http.Request) {
