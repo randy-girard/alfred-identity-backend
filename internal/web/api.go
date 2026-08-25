@@ -339,6 +339,13 @@ func (s *Server) handleAccountSub(w http.ResponseWriter, r *http.Request) {
 						groupIDs = *body.GroupIDs
 					}
 				}
+				if len(roleIDs) == 0 && len(userIDs) == 0 && len(groupIDs) == 0 && s.requireACL {
+					meta, merr := s.store.LoadEQAccountMeta(ctx, accountID)
+					if merr == nil && !meta.Restricted {
+						writeErr(w, http.StatusBadRequest, "account_acl_required")
+						return
+					}
+				}
 				if err := s.store.SetAccountAccess(ctx, accountID, roleIDs, userIDs, groupIDs); err != nil {
 					s.log.Error("web set account access", "err", err)
 					writeErr(w, http.StatusInternalServerError, "internal")

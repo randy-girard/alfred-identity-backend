@@ -38,6 +38,7 @@ type Server struct {
 	bootstrapIDs []string
 	adminRoleID  string
 	sourceName   string
+	requireACL   bool
 
 	liveMu sync.Mutex
 	live   map[*websocket.Conn]store.User
@@ -57,6 +58,7 @@ type Options struct {
 	BootstrapAdminIDs []string
 	AdminRoleID       string
 	SSOSourceName     string
+	RequireAccountACL bool
 }
 
 func New(opts Options) *Server {
@@ -75,6 +77,7 @@ func New(opts Options) *Server {
 		bootstrapIDs: append([]string{}, opts.BootstrapAdminIDs...),
 		adminRoleID:  opts.AdminRoleID,
 		sourceName:   strings.TrimSpace(opts.SSOSourceName),
+		requireACL:   opts.RequireAccountACL,
 		live:         make(map[*websocket.Conn]store.User),
 	}
 	if s.log == nil {

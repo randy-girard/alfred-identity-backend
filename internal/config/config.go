@@ -30,6 +30,7 @@ type Config struct {
 	WebSSOSourceName       string // display name in Discord /sso get JSON and /sso-source.json (SSO_SOURCE_NAME or WEB_SSO_SOURCE_NAME)
 	PresenceTTL            time.Duration
 	LoginAuthRatePerMin    int
+	RequireAccountACL      bool // when true, empty grants on non-restricted accounts are rejected
 }
 
 const DefaultDiscordCommandPrefix = "alfred-identity-"
@@ -68,6 +69,7 @@ func Load() (Config, error) {
 		WebSSOSourceName:       firstNonEmpty(strings.TrimSpace(os.Getenv("SSO_SOURCE_NAME")), strings.TrimSpace(os.Getenv("WEB_SSO_SOURCE_NAME"))),
 		PresenceTTL:            time.Duration(envInt("PRESENCE_TTL_SECONDS", 90)) * time.Second,
 		LoginAuthRatePerMin:    envInt("LOGIN_AUTH_RATE_LIMIT_PER_MIN", 30),
+		RequireAccountACL:      envBool("REQUIRE_ACCOUNT_ACL", false),
 	}
 	if cfg.DiscordEnabled && cfg.DiscordToken == "" {
 		return Config{}, fmt.Errorf("DISCORD_TOKEN required when DISCORD_ENABLED=true")

@@ -137,3 +137,29 @@ func TestWebSetUserRolesForbidden(t *testing.T) {
 	}
 }
 
+func TestRequireAccountACLRejectsEmptyGrants(t *testing.T) {
+	st := openTestStoreForWeb(t)
+	ctx := context.Background()
+	admin, err := st.UpsertUser(ctx, "acl-"+testRandHex(4), "Admin", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := st.AddEQAccount(ctx, "aclacct_"+testRandHex(5), "pw", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := New(Options{
+		Store:             st,
+		SessionKey:        []byte("test-session-key-32-bytes-long!!"),
+		PublicURL:         "http://127.0.0.1:8181",
+		BootstrapAdminIDs: []string{admin.DiscordID},
+		RequireAccountACL: true,
+	})
+	body, _ := json.Marshal(map[string]any{"access": "all"})
+	rr := httptest.NewRecorder()
+	s.handleAccountSub(rr, adminReq(admin, http.MethodPatch, BasePath+"/api/accounts/"+strconv.FormatInt(id, 10), body))
+	if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "account_acl_required") {
+		t.Fatalf("empty ACL: %d %s", rr.Code, rr.Body.String())
+	}
+}
+

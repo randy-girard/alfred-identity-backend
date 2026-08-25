@@ -1425,6 +1425,16 @@ function openAccountModal(account) {
   })
   root.querySelector('[data-save]').addEventListener('click', () => run(async () => {
     const access = accountForm.restricted ? {} : readAccessFields(root)
+    if (!accountForm.restricted && access.required_role_ids && access.required_user_ids && access.group_ids) {
+      const emptyACL = access.required_role_ids.length === 0
+        && access.required_user_ids.length === 0
+        && access.group_ids.length === 0
+      if (emptyACL && !confirm(
+        'Save with empty access grants?\n\nThat means EVERY authenticated SSO user can log into this account and receive its password.',
+      )) {
+        return
+      }
+    }
     if (accountForm.id) {
       const password = accountForm.restricted ? '' : root.querySelector('#m-pass')?.value
       const disabled = !!root.querySelector('#m-dis')?.checked
@@ -1661,7 +1671,7 @@ function accessFieldsHTML(a) {
       <label>Groups</label>
       <div class="role-list" id="m-groups">${groupItems}</div>
     </div>
-    <p class="hint">Leave roles, users, and groups empty for <strong>all</strong> SSO users. If any are set, the login user must match at least one grant (any selected role <em>or</em> user <em>or</em> group).</p>
+    <p class="hint">Leave roles, users, and groups empty for <strong>all</strong> SSO users (they can receive the account password on login). If any are set, the login user must match at least one grant (any selected role <em>or</em> user <em>or</em> group).</p>
   `
 }
 
