@@ -25,7 +25,7 @@ server {
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection "upgrade";
     proxy_set_header Host $host;
-    # Idle WS clients only send keepalives ~every 25s; default 60s cuts them off.
+    # Idle WS clients send keepalives ~every 20s; default 60s cuts them off.
     proxy_read_timeout 3600s;
     proxy_send_timeout 3600s;
   }

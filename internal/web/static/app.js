@@ -79,6 +79,24 @@ let busy = false
 let ws = null
 let wsReconnectTimer = null
 let wsReconnectAttempt = 0
+let wsLivePingTimer = null
+const WS_LIVE_PING_MS = 20000
+
+function stopLivePing() {
+  if (wsLivePingTimer) {
+    clearInterval(wsLivePingTimer)
+    wsLivePingTimer = null
+  }
+}
+
+function startLivePing() {
+  stopLivePing()
+  wsLivePingTimer = setInterval(() => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'ping' }))
+    }
+  }, WS_LIVE_PING_MS)
+}
 let connDurationTimer = null
 let metricsRefreshTimer = null
 let liveConnected = false
@@ -264,6 +282,7 @@ function connectLive() {
     wsReconnectTimer = null
   }
   if (ws) {
+    stopLivePing()
     try { ws.onclose = null; ws.close() } catch (_) {}
     ws = null
   }
@@ -273,6 +292,7 @@ function connectLive() {
   ws.onopen = () => {
     liveConnected = true
     wsReconnectAttempt = 0
+    startLivePing()
     if (status) {
       status.textContent = 'Live · connected'
       status.className = 'ok'
@@ -280,6 +300,7 @@ function connectLive() {
     if (tab === 'overview') refreshOverviewLive()
   }
   ws.onclose = () => {
+    stopLivePing()
     liveConnected = false
     if (status) {
       status.textContent = 'Live · disconnected (retrying…)'

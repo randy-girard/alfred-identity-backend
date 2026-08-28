@@ -23,6 +23,10 @@ import (
 
 const DefaultProtocolVersion = 1
 
+// clientKeepaliveInterval is how often the hub pings idle SSO clients so reverse
+// proxies (often ~60s read timeout) do not drop quiet connections.
+const clientKeepaliveInterval = 45 * time.Second
+
 const (
 	maxUsernameLen  = 64
 	maxPasswordLen  = 128
@@ -136,6 +140,7 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			log.Info("ws auth ok", "user_id", user.ID, "discord_id", user.DiscordID, "client_version", msg.ClientVersion, "is_admin", h.userIsAdmin(user))
 			_ = h.sendFullState(ctx, client)
 			h.Store.Audit(ctx, user.ID, "ws_auth", msg.ClientVersion)
+			go h.clientKeepaliveLoop(ctx, client)
 
 		case "get_state":
 			if !authed || client == nil {
@@ -910,6 +915,19 @@ func (h *Hub) notifyStateListeners() {
 	h.clientsMu.Unlock()
 	for _, fn := range listeners {
 		fn()
+	}
+}
+
+func (h *Hub) clientKeepaliveLoop(ctx context.Context, client *wsClient) {
+	t := time.NewTicker(clientKeepaliveInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			_ = writeJSON(ctx, client.conn, client, map[string]any{"type": "ping"})
+		}
 	}
 }
 

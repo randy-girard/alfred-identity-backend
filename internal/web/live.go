@@ -51,8 +51,22 @@ func (s *Server) handleLiveWS(w http.ResponseWriter, r *http.Request) {
 
 	// Keep connection open; server pushes on Hub broadcasts. Read to detect close.
 	for {
-		if _, _, err := c.Read(r.Context()); err != nil {
+		_, data, err := c.Read(r.Context())
+		if err != nil {
 			return
+		}
+		var tip struct {
+			Type string `json:"type"`
+		}
+		if json.Unmarshal(data, &tip) != nil {
+			continue
+		}
+		switch tip.Type {
+		case "ping":
+			wctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+			_ = c.Write(wctx, websocket.MessageText, []byte(`{"type":"pong"}`))
+			cancel()
+		case "pong":
 		}
 	}
 }
