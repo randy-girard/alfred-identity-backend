@@ -228,6 +228,11 @@ async function api(path, opts = {}) {
   return data
 }
 
+/** Same-origin attachment download that does not need a live user gesture. */
+function downloadAttachment(url) {
+  window.location.assign(url)
+}
+
 async function run(fn) {
   if (busy) return
   busy = true
@@ -1500,35 +1505,15 @@ function bindAccounts(root) {
     root.querySelector('#csv-file')?.click()
   })
   root.querySelector('#export-csv')?.addEventListener('click', () => {
-    run(async () => {
-      const includePasswords = confirm(
-        'Include EQ account passwords in the CSV?\n\nTreat the downloaded file like a password vault. Choose Cancel for usernames and metadata only.',
-      )
-      const q = includePasswords ? '?include_passwords=1' : ''
-      const res = await fetch('/admin/api/accounts/export' + q, { credentials: 'same-origin' })
-      if (res.status === 401) {
-        location.href = '/admin/login'
-        return
-      }
-      if (!res.ok) {
-        let msg = 'Export failed'
-        try {
-          const j = await res.json()
-          if (j.error) msg = j.error
-        } catch (_) {}
-        throw new Error(msg)
-      }
-      const blob = await res.blob()
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = 'alfred-sso-accounts.csv'
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      URL.revokeObjectURL(url)
-      showError('')
-    })
+    if (!isWebAdmin()) return
+    // confirm() blocks long enough that the click gesture expires; a fetch()+blob
+    // <a download> after await is then silently ignored by the browser. Drive the
+    // download via Content-Disposition instead (no user-gesture required).
+    const includePasswords = confirm(
+      'Include EQ account passwords in the CSV?\n\nTreat the downloaded file like a password vault. Choose Cancel for usernames and metadata only.',
+    )
+    const q = includePasswords ? '?include_passwords=1' : ''
+    downloadAttachment('/admin/api/accounts/export' + q)
   })
   root.querySelector('#csv-file')?.addEventListener('change', (ev) => {
     const file = ev.target.files && ev.target.files[0]
@@ -2313,39 +2298,11 @@ function renderSettings() {
 function bindSettings(root) {
   root.querySelector('#export-config')?.addEventListener('click', () => {
     if (!isWebAdmin()) return
-    run(async () => {
-      const includePasswords = confirm(
-        'Include EQ account passwords in the backup JSON?\n\nNeeded for a full restore on a new host. Choose Cancel to omit passwords (safer to store or share the file).',
-      )
-      const q = includePasswords ? '?include_passwords=1' : ''
-      const res = await fetch('/admin/api/settings/backup' + q, { credentials: 'same-origin' })
-      if (res.status === 401) {
-        location.href = '/admin/login'
-        return
-      }
-      if (res.status === 403) {
-        location.href = '/admin/denied?reason=not_authorized'
-        return
-      }
-      if (!res.ok) {
-        let msg = 'Export failed'
-        try {
-          const j = await res.json()
-          if (j.error) msg = j.error
-        } catch (_) {}
-        throw new Error(msg)
-      }
-      const blob = await res.blob()
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = 'alfred-identity-config.json'
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      URL.revokeObjectURL(url)
-      showError('')
-    })
+    const includePasswords = confirm(
+      'Include EQ account passwords in the backup JSON?\n\nNeeded for a full restore on a new host. Choose Cancel to omit passwords (safer to store or share the file).',
+    )
+    const q = includePasswords ? '?include_passwords=1' : ''
+    downloadAttachment('/admin/api/settings/backup' + q)
   })
   root.querySelector('#import-config')?.addEventListener('click', () => {
     if (!isWebAdmin()) return
