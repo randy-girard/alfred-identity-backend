@@ -1417,13 +1417,15 @@ function openAccountModal(account) {
     if (e.target.dataset.close) { accountForm = null; closeModal() }
   })
   root.querySelector('[data-cancel]').addEventListener('click', () => { accountForm = null; closeModal() })
-  root.querySelector('[data-del-acct]')?.addEventListener('click', () => run(async () => {
+  root.querySelector('[data-del-acct]')?.addEventListener('click', () => {
     if (!accountForm?.id) return
     if (!confirm(`Remove account ${accountForm.username || accountForm.id}?`)) return
-    await api(`/admin/api/accounts/${accountForm.id}`, { method: 'DELETE' })
-    accountForm = null
-    closeModal()
-  }))
+    run(async () => {
+      await api(`/admin/api/accounts/${accountForm.id}`, { method: 'DELETE' })
+      accountForm = null
+      closeModal()
+    })
+  })
   bindAccountModalListActions(root)
   root.querySelectorAll('[data-add-list]').forEach((btn) => {
     btn.onclick = () => run(async () => {
@@ -1449,7 +1451,7 @@ function openAccountModal(account) {
       refreshAccountModalLists()
     })
   })
-  root.querySelector('[data-save]').addEventListener('click', () => run(async () => {
+  root.querySelector('[data-save]').addEventListener('click', () => {
     const access = accountForm.restricted ? {} : readAccessFields(root)
     if (!accountForm.restricted && access.required_role_ids && access.required_user_ids && access.group_ids) {
       const emptyACL = access.required_role_ids.length === 0
@@ -1461,43 +1463,45 @@ function openAccountModal(account) {
         return
       }
     }
-    if (accountForm.id) {
-      const password = accountForm.restricted ? '' : root.querySelector('#m-pass')?.value
-      const disabled = !!root.querySelector('#m-dis')?.checked
-      const body = { disabled, ...access }
-      if (password) body.password = password
-      await api(`/admin/api/accounts/${accountForm.id}`, { method: 'PATCH', body: JSON.stringify(body) })
-    } else {
-      const username = root.querySelector('#m-user').value.trim()
-      const password = root.querySelector('#m-pass').value
-      if (!username || !password) throw new Error('username and password required')
-      const res = await api('/admin/api/accounts', {
-        method: 'POST',
-        body: JSON.stringify({
-          username,
-          password,
-          required_role_id: (access.required_role_ids && access.required_role_ids[0]) || '',
-        }),
-      })
-      const id = res.account_id
-      if ((access.required_role_ids && access.required_role_ids.length)
-        || (access.required_user_ids && access.required_user_ids.length)
-        || (access.group_ids && access.group_ids.length)) {
-        await api(`/admin/api/accounts/${id}`, { method: 'PATCH', body: JSON.stringify(access) })
+    run(async () => {
+      if (accountForm.id) {
+        const password = accountForm.restricted ? '' : root.querySelector('#m-pass')?.value
+        const disabled = !!root.querySelector('#m-dis')?.checked
+        const body = { disabled, ...access }
+        if (password) body.password = password
+        await api(`/admin/api/accounts/${accountForm.id}`, { method: 'PATCH', body: JSON.stringify(body) })
+      } else {
+        const username = root.querySelector('#m-user').value.trim()
+        const password = root.querySelector('#m-pass').value
+        if (!username || !password) throw new Error('username and password required')
+        const res = await api('/admin/api/accounts', {
+          method: 'POST',
+          body: JSON.stringify({
+            username,
+            password,
+            required_role_id: (access.required_role_ids && access.required_role_ids[0]) || '',
+          }),
+        })
+        const id = res.account_id
+        if ((access.required_role_ids && access.required_role_ids.length)
+          || (access.required_user_ids && access.required_user_ids.length)
+          || (access.group_ids && access.group_ids.length)) {
+          await api(`/admin/api/accounts/${id}`, { method: 'PATCH', body: JSON.stringify(access) })
+        }
+        for (const al of accountForm.aliases) {
+          await api(`/admin/api/accounts/${id}/aliases`, { method: 'POST', body: JSON.stringify({ alias: al }) })
+        }
+        for (const t of accountForm.tags) {
+          await api(`/admin/api/accounts/${id}/tags`, { method: 'POST', body: JSON.stringify({ tag: t }) })
+        }
+        for (const ch of accountForm.characters) {
+          await api(`/admin/api/accounts/${id}/characters`, { method: 'POST', body: JSON.stringify({ name: ch }) })
+        }
       }
-      for (const al of accountForm.aliases) {
-        await api(`/admin/api/accounts/${id}/aliases`, { method: 'POST', body: JSON.stringify({ alias: al }) })
-      }
-      for (const t of accountForm.tags) {
-        await api(`/admin/api/accounts/${id}/tags`, { method: 'POST', body: JSON.stringify({ tag: t }) })
-      }
-      for (const ch of accountForm.characters) {
-        await api(`/admin/api/accounts/${id}/characters`, { method: 'POST', body: JSON.stringify({ name: ch }) })
-      }
-    }
-    accountForm = null
-    closeModal()
-  }))
+      accountForm = null
+      closeModal()
+    })
+  })
 }
 
 function bindAccounts(root) {
@@ -1849,11 +1853,13 @@ function openGroupModal(group) {
     root.querySelectorAll('input[name=m-g-cmd]').forEach((el) => { el.disabled = true })
   }
   if (isEdit && !isDefault) {
-    root.querySelector('[data-del-group]').addEventListener('click', () => run(async () => {
+    root.querySelector('[data-del-group]').addEventListener('click', () => {
       if (!confirm('Delete this group? Account links and memberships are removed.')) return
-      await api(`/admin/api/groups/${group.id}`, { method: 'DELETE' })
-      closeModal()
-    }))
+      run(async () => {
+        await api(`/admin/api/groups/${group.id}`, { method: 'DELETE' })
+        closeModal()
+      })
+    })
   }
   root.querySelector('[data-save]').addEventListener('click', () => run(async () => {
     const name = root.querySelector('#m-name').value.trim()
@@ -1963,12 +1969,14 @@ function renderShares() {
 
 function bindShares(root) {
   root.querySelectorAll('[data-del-share]').forEach((btn) => {
-    btn.onclick = () => run(async () => {
+    btn.onclick = () => {
       const a = (state.shares || []).find((x) => String(x.id) === btn.dataset.delShare)
       const label = a?.username || `#${btn.dataset.delShare}`
       if (!confirm(`Remove private share “${label}”? This deletes the SSO copy for everyone.`)) return
-      await api(`/admin/api/accounts/${btn.dataset.delShare}`, { method: 'DELETE' })
-    })
+      run(async () => {
+        await api(`/admin/api/accounts/${btn.dataset.delShare}`, { method: 'DELETE' })
+      })
+    }
   })
 }
 
