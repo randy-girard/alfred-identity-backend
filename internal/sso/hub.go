@@ -89,6 +89,11 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	)
 	defer func() {
 		if client != nil {
+			log.Info("ws disconnected",
+				"display_name", client.user.DisplayName,
+				"user_id", client.user.ID,
+				"discord_id", client.user.DiscordID,
+			)
 			h.unregister(client.id)
 		}
 	}()
@@ -138,7 +143,13 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				h.unregister(client.id)
 			}
 			client = h.register(c, user, strings.TrimSpace(msg.ClientVersion))
-			log.Info("ws auth ok", "user_id", user.ID, "discord_id", user.DiscordID, "client_version", msg.ClientVersion, "is_admin", h.userIsAdmin(user))
+			log.Info("ws connected",
+				"display_name", user.DisplayName,
+				"user_id", user.ID,
+				"discord_id", user.DiscordID,
+				"client_version", msg.ClientVersion,
+				"is_admin", h.userIsAdmin(user),
+			)
 			_ = h.sendFullState(ctx, client)
 			h.Store.Audit(ctx, user.ID, "ws_auth", msg.ClientVersion)
 			go h.clientKeepaliveLoop(ctx, client)
@@ -170,6 +181,13 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			lim := h.limiterFor(user.ID)
 			if !lim.Allow() {
+				log.Warn("eq login denied",
+					"reason", "rate_limited",
+					"display_name", user.DisplayName,
+					"user_id", user.ID,
+					"discord_id", user.DiscordID,
+					"typed", msg.Username,
+				)
 				_ = writeJSON(ctx, c, client, map[string]any{
 					"type": "login_auth_response", "request_id": msg.RequestID, "error": "rate_limited",
 				})
@@ -177,6 +195,13 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			cands, err := h.Store.ResolveLoginCandidates(ctx, user, msg.Username)
 			if err != nil || len(cands) == 0 {
+				log.Warn("eq login denied",
+					"reason", "not_found",
+					"display_name", user.DisplayName,
+					"user_id", user.ID,
+					"discord_id", user.DiscordID,
+					"typed", msg.Username,
+				)
 				_ = writeJSON(ctx, c, client, map[string]any{
 					"type": "login_auth_response", "request_id": msg.RequestID, "error": "not_found",
 				})
@@ -184,11 +209,25 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			chosen := pickLoginCandidate(cands, h.Presence)
 			if chosen == 0 {
+				log.Warn("eq login denied",
+					"reason", "all_busy",
+					"display_name", user.DisplayName,
+					"user_id", user.ID,
+					"discord_id", user.DiscordID,
+					"typed", msg.Username,
+				)
 				_ = writeJSON(ctx, c, client, map[string]any{
 					"type": "login_auth_response", "request_id": msg.RequestID, "error": "all_busy",
 				})
 				continue
 			}
+			log.Info("eq login authorized",
+				"display_name", user.DisplayName,
+				"user_id", user.ID,
+				"discord_id", user.DiscordID,
+				"typed", msg.Username,
+				"account_id", chosen,
+			)
 			_ = writeJSON(ctx, c, client, map[string]any{
 				"type": "login_auth_response", "request_id": msg.RequestID,
 				"account_id": chosen, "relay": true,
@@ -235,9 +274,23 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			if msg.Offline {
 				h.Presence.Clear(acctID)
+				log.Info("eq character offline",
+					"display_name", user.DisplayName,
+					"user_id", user.ID,
+					"discord_id", user.DiscordID,
+					"character", msg.CharacterName,
+					"account_id", acctID,
+				)
 			} else {
 				h.Presence.ClearUserExcept(user.ID, acctID)
 				h.Presence.Touch(acctID, msg.CharacterName, user.ID)
+				log.Info("eq character online",
+					"display_name", user.DisplayName,
+					"user_id", user.ID,
+					"discord_id", user.DiscordID,
+					"character", msg.CharacterName,
+					"account_id", acctID,
+				)
 			}
 			h.notifyStateListeners()
 

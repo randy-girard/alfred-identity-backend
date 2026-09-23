@@ -95,7 +95,9 @@ func (h *Hub) relayFor(client *wsClient) (*udpRelay, error) {
 	go h.relayReadLoop(ctx, client, rel)
 	if h.Log != nil {
 		h.Log.Info("login relay UDP started",
+			"display_name", client.user.DisplayName,
 			"user_id", client.user.ID,
+			"discord_id", client.user.DiscordID,
 			"upstream", up.String(),
 			"local", conn.LocalAddr().String(),
 		)
@@ -186,19 +188,29 @@ func (h *Hub) handleLoginRelayUp(ctx context.Context, client *wsClient, user sto
 	out := pkt
 	if msg.Splice {
 		body := rel.stripBody(pkt)
-		spliced, drop, err := h.spliceLoginPacket(ctx, user, body)
+		spliced, dropReason, err := h.spliceLoginPacket(ctx, user, body)
 		if err != nil {
 			if h.Log != nil {
-				h.Log.Error("login relay splice", "err", err, "user_id", user.ID)
+				h.Log.Error("eq login failed",
+					"err", err,
+					"display_name", user.DisplayName,
+					"user_id", user.ID,
+					"discord_id", user.DiscordID,
+				)
 			}
 			_ = writeJSON(ctx, client.conn, client, map[string]any{
 				"type": "login_relay_error", "message": "internal",
 			})
 			return
 		}
-		if drop {
+		if dropReason != "" {
 			if h.Log != nil {
-				h.Log.Warn("login relay dropped splice", "user_id", user.ID)
+				h.Log.Warn("eq login denied",
+					"reason", dropReason,
+					"display_name", user.DisplayName,
+					"user_id", user.ID,
+					"discord_id", user.DiscordID,
+				)
 			}
 			return
 		}
@@ -215,34 +227,34 @@ func (h *Hub) handleLoginRelayUp(ctx context.Context, client *wsClient, user sto
 }
 
 // spliceLoginPacket replaces alias credentials with vault credentials.
-// drop=true means the packet must not be forwarded (ACL / busy / rate limit).
-// spliced==nil and drop=false means the body was not a login packet; caller
+// dropReason != "" means the packet must not be forwarded (ACL / busy / rate limit).
+// spliced==nil and dropReason=="" means the body was not a login packet; caller
 // should forward the original datagram.
-func (h *Hub) spliceLoginPacket(ctx context.Context, user store.User, body []byte) (spliced []byte, drop bool, err error) {
+func (h *Hub) spliceLoginPacket(ctx context.Context, user store.User, body []byte) (spliced []byte, dropReason string, err error) {
 	lp, ok := eqlogin.ParseLoginPacket(body)
 	if !ok {
-		return nil, false, nil
+		return nil, "", nil
 	}
 	lim := h.limiterFor(user.ID)
 	if !lim.Allow() {
-		return nil, true, nil
+		return nil, "rate_limited", nil
 	}
 	cands, err := h.Store.ResolveLoginCandidates(ctx, user, lp.Username)
 	if err != nil || len(cands) == 0 {
-		return nil, true, nil
+		return nil, "not_found", nil
 	}
 	chosen := pickLoginCandidate(cands, h.Presence)
 	if chosen == 0 {
-		return nil, true, nil
+		return nil, "all_busy", nil
 	}
 	realUser, password, err := h.Store.DecryptCredentials(ctx, chosen)
 	if err != nil {
-		return nil, false, err
+		return nil, "", err
 	}
 	out, err := lp.RewriteCredentials(realUser, password)
 	password = ""
 	if err != nil {
-		return nil, false, err
+		return nil, "", err
 	}
 	if h.Presence != nil {
 		h.Presence.ClearUserExcept(user.ID, chosen)
@@ -250,7 +262,14 @@ func (h *Hub) spliceLoginPacket(ctx context.Context, user store.User, body []byt
 	h.Store.AuditAccount(ctx, user.ID, chosen, "login_relay", lp.Username)
 	h.broadcastFullState()
 	if h.Log != nil {
-		h.Log.Info("login relay spliced", "user_id", user.ID, "account_id", chosen, "typed", lp.Username)
+		h.Log.Info("eq login",
+			"display_name", user.DisplayName,
+			"user_id", user.ID,
+			"discord_id", user.DiscordID,
+			"typed", lp.Username,
+			"eq_username", realUser,
+			"account_id", chosen,
+		)
 	}
-	return out, false, nil
+	return out, "", nil
 }

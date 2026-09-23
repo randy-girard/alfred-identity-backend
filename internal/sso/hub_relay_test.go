@@ -39,9 +39,9 @@ func combinedLogin(t *testing.T, user, pass string) []byte {
 
 func TestSpliceLoginPacketIgnoresNonLogin(t *testing.T) {
 	h := &Hub{}
-	spliced, drop, err := h.spliceLoginPacket(context.Background(), store.User{}, []byte{0x00, eqlogin.OpKeepAlive})
-	if err != nil || drop || spliced != nil {
-		t.Fatalf("spliced=%v drop=%v err=%v", spliced, drop, err)
+	spliced, dropReason, err := h.spliceLoginPacket(context.Background(), store.User{}, []byte{0x00, eqlogin.OpKeepAlive})
+	if err != nil || dropReason != "" || spliced != nil {
+		t.Fatalf("spliced=%v drop=%q err=%v", spliced, dropReason, err)
 	}
 }
 
