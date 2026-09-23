@@ -31,7 +31,8 @@ type Config struct {
 	WebSessionKey          []byte // optional; when empty, derived from DataEncryptionKey via HKDF
 	PresenceTTL            time.Duration
 	LoginAuthRatePerMin    int
-	RequireAccountACL      bool // when true, empty grants on non-restricted accounts are rejected
+	RequireAccountACL      bool   // when true, empty grants on non-restricted accounts are rejected
+	EQLoginUpstream        string // UDP login server the daemon dials for SSO relay
 }
 
 const DefaultDiscordCommandPrefix = "alfred-identity-"
@@ -71,6 +72,7 @@ func Load() (Config, error) {
 		PresenceTTL:            time.Duration(envInt("PRESENCE_TTL_SECONDS", 90)) * time.Second,
 		LoginAuthRatePerMin:    envInt("LOGIN_AUTH_RATE_LIMIT_PER_MIN", 30),
 		RequireAccountACL:      envBool("REQUIRE_ACCOUNT_ACL", false),
+		EQLoginUpstream:        envOr("EQ_LOGIN_UPSTREAM", "login.eqemulator.net:5998"),
 	}
 	if sk := strings.TrimSpace(os.Getenv("WEB_SESSION_KEY")); sk != "" {
 		raw, err := base64.StdEncoding.DecodeString(sk)

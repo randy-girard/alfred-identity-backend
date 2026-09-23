@@ -179,8 +179,11 @@ func TestHubLoginAuthAndHeartbeat(t *testing.T) {
 	if int64(resp["account_id"].(float64)) != acctID {
 		t.Fatalf("account_id=%v want %d", resp["account_id"], acctID)
 	}
-	if resp["encrypted_credentials"] == "" || resp["real_user"] != uname {
-		t.Fatalf("creds missing: %#v", resp)
+	if resp["encrypted_credentials"] != nil || resp["real_user"] != nil {
+		t.Fatalf("login_auth must not return credentials: %#v", resp)
+	}
+	if resp["relay"] != true {
+		t.Fatalf("expected relay=true: %#v", resp)
 	}
 
 	// Tag pool skips busy and picks the free account.
@@ -195,7 +198,7 @@ func TestHubLoginAuthAndHeartbeat(t *testing.T) {
 		t.Fatalf("expected free tag account %d, got %#v", acct2, resp)
 	}
 
-	// Mark both busy → tag pool all_busy (login_auth clears other presence on success).
+	// Mark both busy → tag pool all_busy.
 	pres.Touch(acctID, charName, u.ID)
 	pres.Touch(acct2, "Other", u.ID)
 	tagCands, err := st.ResolveLoginCandidates(ctxBG, u, tag)

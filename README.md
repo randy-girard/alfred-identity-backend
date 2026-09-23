@@ -80,7 +80,7 @@ Store integration tests (`TestShare*`, `TestToken*`) run when `TEST_DATABASE_URL
 
 1. **Stores** guild EQ accounts (encrypted passwords), users, access groups, aliases/tags/characters, and SSO API tokens in Postgres.
 2. **Authenticates** desktop GUI clients over `ws://host/ws/sso` using per-user API tokens.
-3. **Resolves logins** when the GUI proxy asks for credentials (`login_auth` over the WebSocket).
+3. **Relays EQ login** when the GUI is in Login w/ SSO: the daemon talks UDP to the EQ login server, splices vault credentials there, and never sends the password (or DES blob) to the desktop. `login_auth` only authorizes; `login_relay_up` / `login_relay_down` carry SOE datagrams.
 4. **Optionally** runs a Discord bot for SSO tokens and identity lookup.
 5. **Optionally** serves **Alfred Identity Management** at `/admin/` for the same data as the GUI admin features.
 
@@ -224,7 +224,8 @@ Enable with `WEB_ENABLED=true`, Discord OAuth credentials, and `WEB_PUBLIC_URL`.
 | `SSO_SOURCE_NAME` | Display name in `/sso get` GUI JSON |
 | `WEB_ENABLED` / `WEB_PUBLIC_URL` | Browser admin + OAuth redirect origin |
 | `PRESENCE_TTL_SECONDS` | How long EQ heartbeats count as online |
-| `LOGIN_AUTH_RATE_LIMIT_PER_MIN` | Per-client login_auth throttle |
+| `LOGIN_AUTH_RATE_LIMIT_PER_MIN` | Per-client login_auth / login-relay splice throttle |
+| `EQ_LOGIN_UPSTREAM` | UDP host:port the daemon uses to reach the EQ login server (default `login.eqemulator.net:5998`) |
 
 See [.env.example](.env.example) for the full list.
 

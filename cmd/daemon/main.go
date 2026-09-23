@@ -11,7 +11,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/joho/godotenv"
 	"github.com/alfred-identity/web/internal/config"
 	"github.com/alfred-identity/web/internal/crypto"
 	"github.com/alfred-identity/web/internal/db"
@@ -22,6 +21,7 @@ import (
 	"github.com/alfred-identity/web/internal/sso"
 	"github.com/alfred-identity/web/internal/store"
 	"github.com/alfred-identity/web/internal/web"
+	"github.com/joho/godotenv"
 )
 
 func main() {
@@ -54,6 +54,7 @@ func main() {
 		"ws_path", cfg.WSPath,
 		"discord_enabled", cfg.DiscordEnabled,
 		"protocol_version", cfg.ProtocolVersion,
+		"eq_login_upstream", cfg.EQLoginUpstream,
 		"log_level", level.String(),
 	)
 
@@ -92,6 +93,7 @@ func main() {
 		ProtocolVersion:   cfg.ProtocolVersion,
 		AdminRoleID:       cfg.DiscordAdminRoleID,
 		BootstrapAdminIDs: cfg.DiscordBootstrapAdmins,
+		LoginUpstream:     cfg.EQLoginUpstream,
 		Log:               logger,
 	}
 	hub.SetRatePerMin(cfg.LoginAuthRatePerMin)

@@ -21,7 +21,15 @@ Re-sends `full_state` for the authenticated user (after Discord group/account ch
 ```json
 { "type": "login_auth", "request_id": "uuid", "username": "tag-alias-or-character" }
 ```
-Daemon is authoritative: resolve **tag** (shared → cycle free / non-busy accounts), unique **alias**, **username**, or **character** → allowed non-disabled accounts. Busy/presence skipping applies **only** to multi-account **tag** pools; direct identity matches always return credentials (EQ reports already-logged-in if the session is occupied).
+Daemon is authoritative: resolve **tag** (shared → cycle free / non-busy accounts), unique **alias**, **username**, or **character** → allowed non-disabled accounts. Busy/presence skipping applies **only** to multi-account **tag** pools; direct identity matches always return authorization (EQ reports already-logged-in if the session is occupied).
+
+Success does **not** include credentials. The GUI then tunnels the SOE login session via `login_relay_up`; the daemon splices the vault password on its own UDP socket to `EQ_LOGIN_UPSTREAM`.
+
+### `login_relay_up`
+```json
+{ "type": "login_relay_up", "payload": "<base64 SOE datagram>", "splice": true }
+```
+Authenticated GUI → daemon. `splice` is true only for the Combined login packet after a successful `login_auth`. The daemon may rewrite that packet with vault credentials, then UDP-sends to the EQ login server. Other datagrams are forwarded unchanged.
 
 ### `heartbeat`
 ```json
@@ -148,9 +156,8 @@ Success:
 {
   "type": "login_auth_response",
   "request_id": "uuid",
-  "real_user": "equser",
-  "encrypted_credentials": "<base64 DES-CBC blob>",
-  "account_id": 1
+  "account_id": 1,
+  "relay": true
 }
 ```
 Error:
@@ -158,7 +165,18 @@ Error:
 { "type": "login_auth_response", "request_id": "uuid", "error": "not_found|all_busy|rate_limited|internal" }
 ```
 
-DES wire: username`\0`password`\0`, zero-pad to 8, DES-CBC with key/IV eight zero bytes. Treat blob as a password — ephemeral, TLS only, never log or persist.
+**Never** includes `real_user`, passwords, or DES blobs. Treat `relay: true` as “this login may proceed through `login_relay_up`.”
+
+### `login_relay_down`
+```json
+{ "type": "login_relay_down", "payload": "<base64 SOE datagram from EQ login server>" }
+```
+Daemon → GUI. Forward to the local EQ client. Session/server-list traffic only — not account passwords.
+
+### `login_relay_error`
+```json
+{ "type": "login_relay_error", "message": "bad_payload|upstream_unavailable|internal|…" }
+```
 
 ### `error` / `ping`
 ```json

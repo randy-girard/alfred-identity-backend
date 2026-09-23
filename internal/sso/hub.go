@@ -2,7 +2,6 @@ package sso
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,7 +12,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/alfred-identity/web/internal/crypto"
 	"github.com/alfred-identity/web/internal/presence"
 	"github.com/alfred-identity/web/internal/store"
 	"github.com/coder/websocket"
@@ -42,13 +40,14 @@ type Hub struct {
 	AdminRoleID       string
 	BootstrapAdminIDs []string
 	LoginAuthLimiter  *rate.Limiter
+	LoginUpstream     string   // EQ login server host:port; default login.eqemulator.net:5998
 	perToken          sync.Map // userID -> *rate.Limiter
 	ratePerMin        int
 	Log               *slog.Logger
 	ShareNotifier     AccountShareNotifier
 
-	clientsMu sync.Mutex
-	clients   map[string]*wsClient
+	clientsMu      sync.Mutex
+	clients        map[string]*wsClient
 	stateListeners []func()
 }
 
@@ -64,6 +63,8 @@ type wsClient struct {
 	clientVersion string
 	connectedAt   time.Time
 	writeMu       sync.Mutex
+	relayMu       sync.Mutex
+	relay         *udpRelay
 }
 
 func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -188,32 +189,17 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				})
 				continue
 			}
-			realUser, password, err := h.Store.DecryptCredentials(ctx, chosen)
-			if err != nil {
-				_ = writeJSON(ctx, c, client, map[string]any{
-					"type": "login_auth_response", "request_id": msg.RequestID, "error": "internal",
-				})
-				continue
-			}
-			blob, err := crypto.PackCredentials(realUser, password)
-			password = ""
-			if err != nil {
-				_ = writeJSON(ctx, c, client, map[string]any{
-					"type": "login_auth_response", "request_id": msg.RequestID, "error": "internal",
-				})
-				continue
-			}
-			if h.Presence != nil {
-				h.Presence.ClearUserExcept(user.ID, chosen)
-			}
 			_ = writeJSON(ctx, c, client, map[string]any{
 				"type": "login_auth_response", "request_id": msg.RequestID,
-				"real_user": realUser, "encrypted_credentials": base64.StdEncoding.EncodeToString(blob),
-				"account_id": chosen,
+				"account_id": chosen, "relay": true,
 			})
-			h.Store.AuditAccount(ctx, user.ID, chosen, "login_auth", msg.Username)
-			// Owners watching share activity get an updated full_state.
-			h.broadcastFullState()
+
+		case "login_relay_up":
+			if !authed || client == nil {
+				_ = writeJSON(ctx, c, nil, map[string]any{"type": "error", "message": "unauthorized"})
+				continue
+			}
+			h.handleLoginRelayUp(ctx, client, user, data)
 
 		case "heartbeat":
 			if !authed {
@@ -952,9 +938,12 @@ func (h *Hub) register(c *websocket.Conn, user store.User, clientVersion string)
 
 func (h *Hub) unregister(id string) {
 	h.clientsMu.Lock()
-	_, ok := h.clients[id]
+	cl, ok := h.clients[id]
 	delete(h.clients, id)
 	h.clientsMu.Unlock()
+	if cl != nil {
+		cl.closeRelay()
+	}
 	if ok {
 		h.notifyStateListeners()
 	}
@@ -1038,6 +1027,7 @@ func (h *Hub) disconnectUser(userID int64, reason string) {
 	}
 	h.clientsMu.Unlock()
 	for _, cl := range list {
+		cl.closeRelay()
 		_ = writeJSON(context.Background(), cl.conn, cl, map[string]any{
 			"type": "error", "message": reason,
 		})
