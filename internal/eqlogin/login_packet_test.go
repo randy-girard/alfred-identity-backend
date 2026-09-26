@@ -83,3 +83,33 @@ func TestParseSessionResponse(t *testing.T) {
 		t.Fatal("session response must not use CRC")
 	}
 }
+
+func TestLooksLikeLoginFailureAndSuccess(t *testing.T) {
+	if LooksLikeLoginFailure(nil) || LooksLikeLoginFailure([]byte{0x00}) {
+		t.Fatal("short packet")
+	}
+	if !LooksLikeLoginFailure([]byte{0x00, OpDisconnect}) {
+		t.Fatal("disconnect")
+	}
+	chat := []byte{0x00, OpPacket, 0x00, 0x00, byte(AppChatMessage), 0x00, 'x'}
+	if !LooksLikeLoginFailure(chat) {
+		t.Fatal("chat message opcode")
+	}
+	text := []byte{0x00, OpPacket, 0x00, 0x00, 0x00, 0x00}
+	text = append(text, []byte("Error: Invalid Username or Password")...)
+	if !LooksLikeLoginFailure(text) {
+		t.Fatal("invalid username text")
+	}
+	list := []byte{0x00, OpPacket, 0x00, 0x00, byte(AppServerListResponse), 0x00}
+	if LooksLikeLoginFailure(list) || !LooksLikeLoginSuccess(list) {
+		t.Fatal("server list")
+	}
+	if !LooksLikeLoginSuccess([]byte{0x00, OpFragment, 0x00, 0x00}) {
+		t.Fatal("fragment is treated as server-list success")
+	}
+	combined := []byte{0x00, OpCombined, byte(len(chat))}
+	combined = append(combined, chat...)
+	if !LooksLikeLoginFailure(combined) {
+		t.Fatal("combined chat")
+	}
+}

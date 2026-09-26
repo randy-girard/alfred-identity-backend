@@ -19,12 +19,14 @@ const (
 )
 
 type udpRelay struct {
-	mu       sync.Mutex
-	conn     *net.UDPConn
-	upstream *net.UDPAddr
-	crcBytes byte
-	crcKey   uint32
-	cancel   context.CancelFunc
+	mu             sync.Mutex
+	conn           *net.UDPConn
+	upstream       *net.UDPAddr
+	crcBytes       byte
+	crcKey         uint32
+	cancel         context.CancelFunc
+	typedFallback  []byte
+	typedRetryUsed bool
 }
 
 func (r *udpRelay) close() {
@@ -123,6 +125,21 @@ func (h *Hub) relayReadLoop(ctx context.Context, client *wsClient, rel *udpRelay
 		}
 		pkt := append([]byte{}, buf[:n]...)
 		rel.noteDownlink(pkt)
+		if eqlogin.LooksLikeLoginFailure(pkt) {
+			if retry := rel.takeTypedRetry(); retry != nil {
+				if h.Log != nil {
+					h.Log.Info("eq login retrying typed credentials",
+						"display_name", client.user.DisplayName,
+						"user_id", client.user.ID,
+						"discord_id", client.user.DiscordID,
+					)
+				}
+				if _, err := rel.conn.WriteToUDP(retry, rel.upstream); err != nil && h.Log != nil {
+					h.Log.Warn("eq login typed retry send failed", "err", err, "user_id", client.user.ID)
+				}
+				continue
+			}
+		}
 		_ = writeJSON(ctx, client.conn, client, map[string]any{
 			"type":    "login_relay_down",
 			"payload": base64.StdEncoding.EncodeToString(pkt),
@@ -137,6 +154,44 @@ func (r *udpRelay) noteDownlink(pkt []byte) {
 		r.crcKey = resp.EncodeKey
 		r.mu.Unlock()
 	}
+	if eqlogin.LooksLikeLoginSuccess(pkt) {
+		r.clearTypedFallback()
+	}
+}
+
+func (r *udpRelay) setTypedFallback(pkt []byte) {
+	if r == nil || len(pkt) == 0 {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.typedFallback = append([]byte{}, pkt...)
+	r.typedRetryUsed = false
+}
+
+func (r *udpRelay) takeTypedRetry() []byte {
+	if r == nil {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.typedRetryUsed || len(r.typedFallback) == 0 {
+		return nil
+	}
+	r.typedRetryUsed = true
+	out := r.typedFallback
+	r.typedFallback = nil
+	return out
+}
+
+func (r *udpRelay) clearTypedFallback() {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.typedFallback = nil
+	r.typedRetryUsed = true
 }
 
 func (r *udpRelay) stripBody(pkt []byte) []byte {
@@ -188,7 +243,7 @@ func (h *Hub) handleLoginRelayUp(ctx context.Context, client *wsClient, user sto
 	out := pkt
 	if msg.Splice {
 		body := rel.stripBody(pkt)
-		spliced, dropReason, err := h.spliceLoginPacket(ctx, user, body)
+		spliced, dropReason, retryTyped, err := h.spliceLoginPacket(ctx, user, body)
 		if err != nil {
 			if h.Log != nil {
 				h.Log.Error("eq login failed",
@@ -216,6 +271,9 @@ func (h *Hub) handleLoginRelayUp(ctx context.Context, client *wsClient, user sto
 		}
 		if spliced != nil {
 			out = rel.wrapSpliced(spliced)
+			if retryTyped {
+				rel.setTypedFallback(pkt)
+			}
 		}
 	}
 
@@ -228,33 +286,45 @@ func (h *Hub) handleLoginRelayUp(ctx context.Context, client *wsClient, user sto
 
 // spliceLoginPacket replaces alias credentials with vault credentials.
 // dropReason != "" means the packet must not be forwarded (ACL / busy / rate limit).
-// spliced==nil and dropReason=="" means the body was not a login packet; caller
-// should forward the original datagram.
-func (h *Hub) spliceLoginPacket(ctx context.Context, user store.User, body []byte) (spliced []byte, dropReason string, err error) {
+// spliced==nil and dropReason=="" means forward the original datagram (not a
+// login packet, or no vault match — try the typed username/password).
+// retryTyped is true when vault credentials were sent and differ from what
+// the client typed, so a login-server failure should retry the original packet.
+func (h *Hub) spliceLoginPacket(ctx context.Context, user store.User, body []byte) (spliced []byte, dropReason string, retryTyped bool, err error) {
 	lp, ok := eqlogin.ParseLoginPacket(body)
 	if !ok {
-		return nil, "", nil
+		return nil, "", false, nil
 	}
 	lim := h.limiterFor(user.ID)
 	if !lim.Allow() {
-		return nil, "rate_limited", nil
+		return nil, "rate_limited", false, nil
 	}
 	cands, err := h.Store.ResolveLoginCandidates(ctx, user, lp.Username)
 	if err != nil || len(cands) == 0 {
-		return nil, "not_found", nil
+		if h.Log != nil {
+			h.Log.Info("eq login using typed credentials",
+				"reason", "not_found",
+				"display_name", user.DisplayName,
+				"user_id", user.ID,
+				"discord_id", user.DiscordID,
+				"typed", lp.Username,
+			)
+		}
+		return nil, "", false, nil
 	}
 	chosen := pickLoginCandidate(cands, h.Presence)
 	if chosen == 0 {
-		return nil, "all_busy", nil
+		return nil, "all_busy", false, nil
 	}
 	realUser, password, err := h.Store.DecryptCredentials(ctx, chosen)
 	if err != nil {
-		return nil, "", err
+		return nil, "", false, err
 	}
+	retryTyped = lp.Password != password
 	out, err := lp.RewriteCredentials(realUser, password)
 	password = ""
 	if err != nil {
-		return nil, "", err
+		return nil, "", false, err
 	}
 	if h.Presence != nil {
 		h.Presence.ClearUserExcept(user.ID, chosen)
@@ -269,7 +339,8 @@ func (h *Hub) spliceLoginPacket(ctx context.Context, user store.User, body []byt
 			"typed", lp.Username,
 			"eq_username", realUser,
 			"account_id", chosen,
+			"typed_fallback", retryTyped,
 		)
 	}
-	return out, "", nil
+	return out, "", retryTyped, nil
 }

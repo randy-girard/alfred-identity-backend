@@ -1,6 +1,9 @@
 package eqlogin
 
-import "encoding/binary"
+import (
+	"bytes"
+	"encoding/binary"
+)
 
 // Transport opcodes (big-endian).
 const (
@@ -12,6 +15,13 @@ const (
 	OpPacket          = 0x0009
 	OpFragment        = 0x000D
 	OpAck             = 0x0015
+)
+
+// EQ login application opcodes (EQEmu opcodes.conf, Titanium/SoF).
+const (
+	AppChatMessage        = 0x0016
+	AppLoginAccepted      = 0x0017
+	AppServerListResponse = 0x0018
 )
 
 type SessionResponse struct {
@@ -50,4 +60,57 @@ func ParseSessionResponse(data []byte) (SessionResponse, bool) {
 func PacketUsesCRC(data []byte) bool {
 	op := TransportOpcode(data)
 	return op != OpSessionRequest && op != OpSessionResponse
+}
+
+// LooksLikeLoginFailure reports EQ login-server replies that mean the
+// credentials were rejected (chat error, disconnect, or "invalid username").
+func LooksLikeLoginFailure(pkt []byte) bool {
+	if len(pkt) < 2 {
+		return false
+	}
+	if TransportOpcode(pkt) == OpDisconnect {
+		return true
+	}
+	lower := bytes.ToLower(pkt)
+	if bytes.Contains(lower, []byte("invalid username")) || bytes.Contains(lower, []byte("invalid password")) {
+		return true
+	}
+	return walkAppOpcodes(pkt, func(app uint16) bool {
+		return app == AppChatMessage
+	})
+}
+
+// LooksLikeLoginSuccess reports a server-list (or fragment of one), which
+// means vault credentials already worked.
+func LooksLikeLoginSuccess(pkt []byte) bool {
+	if TransportOpcode(pkt) == OpFragment {
+		return true
+	}
+	return walkAppOpcodes(pkt, func(app uint16) bool {
+		return app == AppServerListResponse
+	})
+}
+
+func walkAppOpcodes(pkt []byte, fn func(uint16) bool) bool {
+	switch TransportOpcode(pkt) {
+	case OpPacket:
+		if len(pkt) >= 6 {
+			return fn(binary.LittleEndian.Uint16(pkt[4:6]))
+		}
+	case OpCombined:
+		i := 2
+		for i < len(pkt) {
+			n := int(pkt[i])
+			i++
+			if n <= 0 || i+n > len(pkt) {
+				break
+			}
+			sub := pkt[i : i+n]
+			i += n
+			if walkAppOpcodes(sub, fn) {
+				return true
+			}
+		}
+	}
+	return false
 }
