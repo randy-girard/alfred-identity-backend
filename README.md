@@ -1,6 +1,6 @@
 # Alfred Identity Backend
 
-Go daemon for Discord-managed EQ bot/SSO accounts, Postgres-backed secrets (AES-GCM), a WebSocket SSO API for the **[alfred-identity](https://github.com/randy-girard/alfred-identity)** desktop GUI, and an optional browser admin UI (**Alfred Identity Management**).
+Go daemon for Discord-managed EQ bot/SSO accounts, Postgres-backed secrets (AES-GCM), a WebSocket SSO API for the **[alfred-identity](https://github.com/goodguysguild/alfred-identity)** desktop GUI, and an optional browser admin UI (**Alfred Identity Management**).
 
 ## Requirements
 
