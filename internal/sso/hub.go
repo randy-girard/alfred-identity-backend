@@ -240,6 +240,13 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			h.handleLoginRelayUp(ctx, client, user, data)
 
+		case "login_splice":
+			if !authed || client == nil {
+				_ = writeJSON(ctx, c, nil, map[string]any{"type": "error", "message": "unauthorized"})
+				continue
+			}
+			h.handleLoginSplice(ctx, client, user, data)
+
 		case "heartbeat":
 			if !authed {
 				continue

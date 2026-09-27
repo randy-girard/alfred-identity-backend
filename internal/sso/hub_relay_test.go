@@ -279,3 +279,57 @@ func TestHubLoginRelayRetriesTypedOnLoginFailure(t *testing.T) {
 		t.Fatalf("retry typed user=%q pass=%q want %q/real-eq-pass", lp2.Username, lp2.Password, alias)
 	}
 }
+
+func TestHubLoginSpliceReturnsVaultPacket(t *testing.T) {
+	st := openHubTestStore(t)
+	ctxBG := context.Background()
+	u, err := st.UpsertUser(ctxBG, "splice-"+randHex(4), "Splice User", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _, err := st.CreateToken(ctxBG, u.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	realUser := "realbox_" + randHex(4)
+	acctID, err := st.AddEQAccount(ctxBG, realUser, "vaultpass", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	alias := "tank_" + randHex(3)
+	if err := st.AddAlias(ctxBG, alias, acctID); err != nil {
+		t.Fatal(err)
+	}
+
+	h := &Hub{
+		Store:           st,
+		Presence:        presence.New(time.Minute),
+		ProtocolVersion: DefaultProtocolVersion,
+	}
+	conn, ctx, cancel := dialHub(t, h)
+	defer cancel()
+	authHub(t, ctx, conn, raw)
+
+	pkt := combinedLogin(t, alias, "junk-password")
+	writeWS(t, ctx, conn, map[string]any{
+		"type":       "login_splice",
+		"request_id": "spl-1",
+		"payload":    base64.StdEncoding.EncodeToString(pkt),
+	})
+	msg := readWSUntil(t, ctx, conn, "login_splice_result")
+	if errStr, _ := msg["error"].(string); errStr != "" {
+		t.Fatalf("splice error=%s", errStr)
+	}
+	payload, _ := msg["payload"].(string)
+	wire, err := base64.StdEncoding.DecodeString(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lp, ok := eqlogin.ParseLoginPacket(wire)
+	if !ok {
+		t.Fatalf("result was not a login: %x", wire)
+	}
+	if lp.Username != realUser || lp.Password != "vaultpass" {
+		t.Fatalf("spliced creds user=%q pass=%q want %q/vaultpass", lp.Username, lp.Password, realUser)
+	}
+}

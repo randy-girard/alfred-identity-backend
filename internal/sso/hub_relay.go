@@ -284,6 +284,66 @@ func (h *Hub) handleLoginRelayUp(ctx context.Context, client *wsClient, user sto
 	}
 }
 
+func (h *Hub) handleLoginSplice(ctx context.Context, client *wsClient, user store.User, data []byte) {
+	var msg struct {
+		Type      string `json:"type"`
+		RequestID string `json:"request_id"`
+		Payload   string `json:"payload"`
+	}
+	reply := func(payload []byte, errMsg string) {
+		out := map[string]any{
+			"type":       "login_splice_result",
+			"request_id": msg.RequestID,
+		}
+		if errMsg != "" {
+			out["error"] = errMsg
+		}
+		if len(payload) > 0 {
+			out["payload"] = base64.StdEncoding.EncodeToString(payload)
+		}
+		_ = writeJSON(ctx, client.conn, client, out)
+	}
+	if err := json.Unmarshal(data, &msg); err != nil {
+		reply(nil, "bad_request")
+		return
+	}
+	pkt, err := base64.StdEncoding.DecodeString(msg.Payload)
+	if err != nil || len(pkt) == 0 || len(pkt) > maxRelayPayload {
+		reply(nil, "bad_payload")
+		return
+	}
+	spliced, dropReason, _, err := h.spliceLoginPacket(ctx, user, pkt)
+	if err != nil {
+		if h.Log != nil {
+			h.Log.Error("eq login splice failed",
+				"err", err,
+				"display_name", user.DisplayName,
+				"user_id", user.ID,
+				"discord_id", user.DiscordID,
+			)
+		}
+		reply(nil, "internal")
+		return
+	}
+	if dropReason != "" {
+		if h.Log != nil {
+			h.Log.Warn("eq login splice denied",
+				"reason", dropReason,
+				"display_name", user.DisplayName,
+				"user_id", user.ID,
+				"discord_id", user.DiscordID,
+			)
+		}
+		reply(nil, dropReason)
+		return
+	}
+	out := pkt
+	if spliced != nil {
+		out = spliced
+	}
+	reply(out, "")
+}
+
 // spliceLoginPacket replaces alias credentials with vault credentials.
 // dropReason != "" means the packet must not be forwarded (ACL / busy / rate limit).
 // spliced==nil and dropReason=="" means forward the original datagram (not a

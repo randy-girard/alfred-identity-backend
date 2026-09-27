@@ -80,7 +80,7 @@ Store integration tests (`TestShare*`, `TestToken*`) run when `TEST_DATABASE_URL
 
 1. **Stores** guild EQ accounts (encrypted passwords), users, access groups, aliases/tags/characters, and SSO API tokens in Postgres.
 2. **Authenticates** desktop GUI clients over `ws://host/ws/sso` using per-user API tokens.
-3. **Relays EQ login** when the GUI is in Login w/ SSO: the daemon talks UDP to the EQ login server, splices vault credentials there, and never sends the password (or DES blob) to the desktop. `login_auth` only authorizes; `login_relay_up` / `login_relay_down` carry SOE datagrams.
+3. **Splices EQ login** when the GUI is in Login w/ SSO: `login_auth` authorizes the alias; `login_splice` rewrites the Combined login with the vault password and returns it. The desktop UDP-sends that packet from the player machine so the EQ login server (and later world transfer) see the player's IP. Legacy clients may still tunnel UDP via `login_relay_up` / `login_relay_down`.
 4. **Optionally** runs a Discord bot for SSO tokens and identity lookup.
 5. **Optionally** serves **Alfred Identity Management** at `/admin/` for the same data as the GUI admin features.
 

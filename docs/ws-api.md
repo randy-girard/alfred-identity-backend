@@ -23,13 +23,19 @@ Re-sends `full_state` for the authenticated user (after Discord group/account ch
 ```
 Daemon is authoritative: resolve **tag** (shared → cycle free / non-busy accounts), unique **alias**, **username**, or **character** → allowed non-disabled accounts. Busy/presence skipping applies **only** to multi-account **tag** pools; direct identity matches always return authorization (EQ reports already-logged-in if the session is occupied).
 
-Success does **not** include credentials. The GUI then tunnels the SOE login session via `login_relay_up`; the daemon splices the vault password on its own UDP socket to `EQ_LOGIN_UPSTREAM`.
+Success does **not** include credentials. The GUI then sends `login_splice` with the Combined login datagram; the daemon rewrites the vault password and returns the packet. The GUI UDP-sends it from the player machine.
+
+### `login_splice`
+```json
+{ "type": "login_splice", "request_id": "uuid", "payload": "<base64 CRC-stripped Combined login>" }
+```
+Authenticated GUI → daemon. Daemon may rewrite vault credentials and replies with `login_splice_result`. The GUI UDP-sends the result to the EQ login server so world transfer sees the player's IP.
 
 ### `login_relay_up`
 ```json
 { "type": "login_relay_up", "payload": "<base64 SOE datagram>", "splice": true }
 ```
-Authenticated GUI → daemon. `splice` is true only for the Combined login packet after a successful `login_auth`. The daemon may rewrite that packet with vault credentials, then UDP-sends to the EQ login server. Other datagrams are forwarded unchanged.
+Legacy: daemon UDP-sends to `EQ_LOGIN_UPSTREAM` (login appears to come from the VPS). New GUI uses `login_splice` instead.
 
 ### `heartbeat`
 ```json
@@ -165,7 +171,13 @@ Error:
 { "type": "login_auth_response", "request_id": "uuid", "error": "not_found|all_busy|rate_limited|internal" }
 ```
 
-**Never** includes `real_user`, passwords, or DES blobs. Treat `relay: true` as “this login may proceed through `login_relay_up`.”
+**Never** includes `real_user`, passwords, or DES blobs. Treat `relay: true` as “this login may proceed through `login_splice`.”
+
+### `login_splice_result`
+```json
+{ "type": "login_splice_result", "request_id": "uuid", "payload": "<base64 CRC-stripped Combined login>" }
+```
+Daemon → GUI. GUI UDP-sends `payload` to the EQ login server. On drop, `error` is set (`rate_limited`, `all_busy`, `bad_payload`, …).
 
 ### `login_relay_down`
 ```json
