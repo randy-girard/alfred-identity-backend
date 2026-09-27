@@ -12,9 +12,10 @@ Go daemon for Discord-managed EQ bot/SSO accounts, Postgres-backed secrets (AES-
 
 ```
 cmd/
-  daemon/               # HTTP + WebSocket + Discord bot entrypoint
+  daemon/               # HTTP + WebSocket and/or Discord bot (`-process web|discord|all`)
   seedtoken/            # Bootstrap SSO token when Discord is disabled
 internal/
+  appprocess/           # Procfile process roles (web / discord / all)
   config/               # Environment loading and validation
   crypto/               # AES-GCM for stored passwords
   db/                   # Postgres connect + SQL migrations
@@ -48,9 +49,10 @@ Compose maps host **8181** → container `8080`:
 |----------|-----|
 | Health | `GET http://127.0.0.1:8181/health` |
 | SSO WebSocket | `ws://127.0.0.1:8181/ws/sso` |
+| Open Alfred Identity | `GET http://127.0.0.1:8181/open-alfred` (Discord SSO import landing page) |
 | Web admin (when `WEB_ENABLED=true`) | `http://127.0.0.1:8181/admin/` |
 
-In production, terminate TLS at a reverse proxy and point the GUI at `wss://…/ws/sso`. See [docs/deploy-tls.md](docs/deploy-tls.md).
+In production, terminate TLS at a reverse proxy and point the GUI at `wss://…/ws/sso`. See [docs/deploy-tls.md](docs/deploy-tls.md). On Dokku, run **one** Discord process and scale web separately: [docs/dokku.md](docs/dokku.md).
 
 ## Build (binary only)
 
@@ -101,7 +103,7 @@ Mutations from the web admin or GUI admin API broadcast `full_state` to all conn
 
 ### SSO token for the desktop GUI
 
-**With Discord enabled:** run `/alfred-identity-sso get` (subcommand **`get`**, not `create` — it returns an existing token or creates one). The bot replies with the secret and **Alfred Identity source JSON**. Paste that JSON into the GUI → **Connections** → **Add from JSON**. One active token per Discord user (`get` again returns the same token; use `revoke` then `get` to rotate).
+**With Discord enabled:** run `/alfred-identity-sso get` (subcommand **`get`**, not `create` — it returns an existing token or creates one). The bot replies with **Open in Alfred Identity**, the secret, and source JSON. Click the button (requires `WEB_PUBLIC_URL`) or paste the JSON into the GUI → **Connections** → **Add from JSON**. Importing the same host again updates that source; it does not add a duplicate. One active token per Discord user (`get` again returns the same token; use `revoke` then `get` to rotate).
 
 **Without Discord** (`DISCORD_ENABLED=false`):
 
@@ -173,7 +175,7 @@ After inviting, set in `.env`:
 - `DISCORD_BOOTSTRAP_ADMIN_IDS` — your user snowflake(s), comma-separated
 - `DISCORD_ENABLED=true`
 
-Restart the daemon. You should see `discord ready` in logs and slash commands `/alfred-identity-sso` / `/alfred-identity-whoami` in the guild.
+Restart the **discord** process (Compose: the combined daemon). You should see `discord gateway enabled` in logs and slash commands `/alfred-identity-sso` / `/alfred-identity-whoami` in the guild.
 
 **Share DMs:** recipients must allow *Direct messages from server members* in Discord privacy settings.
 
@@ -185,7 +187,7 @@ Prefix: `DISCORD_COMMAND_PREFIX` (default `alfred-identity-`).
 
 | Command | Purpose |
 |---------|---------|
-| `/{prefix}sso get` | Get or create your SSO token + GUI source JSON |
+| `/{prefix}sso get` | Get or create your SSO token + **Open in Alfred Identity** link |
 | `/{prefix}sso list` | Active token metadata (no secret) |
 | `/{prefix}sso revoke` | Revoke your token (optional `id`) |
 | `/{prefix}whoami` | Identity, cached roles, SSO account count |
@@ -218,11 +220,12 @@ Enable with `WEB_ENABLED=true`, Discord OAuth credentials, and `WEB_PUBLIC_URL`.
 |----------|---------|
 | `DATA_ENCRYPTION_KEY` | Required. 32-byte AES key, base64 |
 | `DATABASE_URL` | Postgres connection string |
-| `HTTP_ADDR` | Listen address (default `0.0.0.0:8080`; Compose uses `8181` on the host) |
+| `HTTP_ADDR` | Listen address (default `0.0.0.0:8080`; Compose uses `8181` on the host). Overridden by `PORT` on Dokku/Heroku web dynos |
+| `PROCESS` | Optional. `web`, `discord`, or `all`. Procfile passes `-process` instead so both dynos can share the same config |
 | `WS_PATH` | SSO WebSocket path (default `/ws/sso`) |
 | `DISCORD_*` | Bot token, guild, admin role, bootstrap IDs, command prefix |
 | `SSO_SOURCE_NAME` | Display name in `/sso get` GUI JSON |
-| `WEB_ENABLED` / `WEB_PUBLIC_URL` | Browser admin + OAuth redirect origin |
+| `WEB_ENABLED` / `WEB_PUBLIC_URL` | Browser admin + OAuth redirect origin. `WEB_PUBLIC_URL` is also required for the Discord **Open in Alfred Identity** button (even if web admin is off) |
 | `PRESENCE_TTL_SECONDS` | How long EQ heartbeats count as online |
 | `LOGIN_AUTH_RATE_LIMIT_PER_MIN` | Per-client login_auth / login-relay splice throttle |
 | `EQ_LOGIN_UPSTREAM` | UDP host:port the daemon uses to reach the EQ login server (default `login.eqemulator.net:5998`) |
@@ -236,5 +239,6 @@ See [.env.example](.env.example) for the full list.
 - [docs/discord-bot-setup.md](docs/discord-bot-setup.md) — Discord application, intents, bot permissions, invite URL, share DMs, slash commands
 - [docs/web-admin.md](docs/web-admin.md) — OAuth web admin, CSV import, live updates
 - [docs/deploy-tls.md](docs/deploy-tls.md) — TLS reverse proxy
+- [docs/dokku.md](docs/dokku.md) — Procfile `web` + `discord` processes, buildpacks, scale=1 for the bot
 - [docs/ws-api.md](docs/ws-api.md) — WebSocket contract (mirrored in the GUI repo)
 - [alfred-identity README](../alfred-identity/README.md) — desktop GUI setup and usage

@@ -7,6 +7,11 @@ RUN CGO_ENABLED=0 go build -o /daemon ./cmd/daemon
 
 FROM alpine:3.20
 RUN apk add --no-cache ca-certificates
-COPY --from=build /daemon /usr/local/bin/daemon
+WORKDIR /app
+COPY --from=build /daemon /app/bin/daemon
+COPY Procfile /app/Procfile
+ENV PATH="/app/bin:${PATH}"
 EXPOSE 8080
-ENTRYPOINT ["/usr/local/bin/daemon"]
+# Compose uses this combined process. Dokku runs Procfile lines instead.
+# No ENTRYPOINT: Procfile commands must be the full command, not extra args.
+CMD ["/app/bin/daemon", "-process", "all"]

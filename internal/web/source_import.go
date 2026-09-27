@@ -1,12 +1,19 @@
 package web
 
 import (
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/url"
 	"strings"
 
 	"github.com/alfred-identity/web/internal/config"
 )
+
+// AppURLScheme is the desktop app protocol Discord's HTTPS landing page opens.
+const AppURLScheme = "alfred-identity"
+
+const discordLinkButtonMaxURL = 512
 
 // SourceImportJSON is pasted into alfred-identity → Connections → Add from JSON.
 type SourceImportJSON struct {
@@ -67,7 +74,7 @@ func SourceNameFromConfig(cfg config.Config) string {
 // BuildSourceImportJSON returns indented JSON for paste into alfred-identity.
 func BuildSourceImportJSON(name, host, token, notes string) string {
 	if notes == "" {
-		notes = "Paste into " + DesktopAppName + " → Connections → Add from JSON."
+		notes = "Click Open in " + DesktopAppName + ", or paste into Connections → Add from JSON."
 	}
 	obj := SourceImportJSON{
 		Name:  name,
@@ -80,4 +87,81 @@ func BuildSourceImportJSON(name, host, token, notes string) string {
 		return "{}"
 	}
 	return string(b)
+}
+
+// EncodeSourceDeepLinkPayload is compact JSON as raw-URL base64 for ?d=.
+func EncodeSourceDeepLinkPayload(name, host, token string) (string, error) {
+	name = strings.TrimSpace(name)
+	host = strings.TrimSpace(host)
+	token = strings.TrimSpace(token)
+	if name == "" || host == "" || token == "" {
+		return "", fmt.Errorf("name, host, and token required")
+	}
+	b, err := json.Marshal(map[string]string{
+		"name":  name,
+		"host":  host,
+		"token": token,
+	})
+	if err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+// EncodeAppSchemeURL builds alfred-identity://import?d=...
+func EncodeAppSchemeURL(name, host, token string) (string, error) {
+	d, err := EncodeSourceDeepLinkPayload(name, host, token)
+	if err != nil {
+		return "", err
+	}
+	return AppURLScheme + "://import?d=" + d, nil
+}
+
+// OpenAlfredURL is the HTTPS landing page Discord can linkify and put on a button.
+// Empty when WEB_PUBLIC_URL is unset.
+func OpenAlfredURL(publicURL, name, host, token string) string {
+	origin := strings.TrimRight(strings.TrimSpace(publicURL), "/")
+	if origin == "" {
+		return ""
+	}
+	d, err := EncodeSourceDeepLinkPayload(name, host, token)
+	if err != nil {
+		return ""
+	}
+	return origin + openAlfredPath + "?d=" + url.QueryEscape(d)
+}
+
+// DiscordOpenAlfredButtonURL returns the landing URL only if it fits a Discord link button.
+func DiscordOpenAlfredButtonURL(publicURL, name, host, token string) string {
+	u := OpenAlfredURL(publicURL, name, host, token)
+	if u == "" || len(u) > discordLinkButtonMaxURL {
+		return ""
+	}
+	return u
+}
+
+// ParseSourceDeepLinkPayload decodes ?d= from /open-alfred or alfred-identity://import.
+func ParseSourceDeepLinkPayload(d string) (SourceImportJSON, error) {
+	d = strings.TrimSpace(d)
+	if d == "" {
+		return SourceImportJSON{}, fmt.Errorf("empty payload")
+	}
+	b, err := base64.RawURLEncoding.DecodeString(d)
+	if err != nil {
+		b, err = base64.URLEncoding.DecodeString(d)
+	}
+	if err != nil {
+		return SourceImportJSON{}, fmt.Errorf("invalid source payload")
+	}
+	var obj SourceImportJSON
+	if err := json.Unmarshal(b, &obj); err != nil {
+		return SourceImportJSON{}, fmt.Errorf("invalid source JSON")
+	}
+	obj.Name = strings.TrimSpace(obj.Name)
+	obj.Host = strings.TrimSpace(obj.Host)
+	obj.Token = strings.TrimSpace(obj.Token)
+	if obj.Name == "" || obj.Host == "" || obj.Token == "" {
+		return SourceImportJSON{}, fmt.Errorf("name, host, and token required")
+	}
+	return obj, nil
 }

@@ -250,3 +250,17 @@ func TestLoadKeyAndWebURLGates(t *testing.T) {
 		t.Fatal("expected public url required")
 	}
 }
+
+func TestApplyPlatformPort(t *testing.T) {
+	cfg := Config{HTTPAddr: "0.0.0.0:8080"}
+	t.Setenv("PORT", "")
+	cfg.ApplyPlatformPort()
+	if cfg.HTTPAddr != "0.0.0.0:8080" {
+		t.Fatalf("empty PORT: %q", cfg.HTTPAddr)
+	}
+	t.Setenv("PORT", "12345")
+	cfg.ApplyPlatformPort()
+	if cfg.HTTPAddr != "0.0.0.0:12345" {
+		t.Fatalf("PORT: %q", cfg.HTTPAddr)
+	}
+}

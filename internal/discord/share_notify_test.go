@@ -41,3 +41,10 @@ func TestNotifyAccountSharedNilSafe(t *testing.T) {
 	b.NotifyAccountShared(nil, store.User{}, "x", nil, nil)
 	b.NotifyAccountShared(nil, store.User{}, "x", nil, []int64{1})
 }
+
+func TestBotCloseRESTNoGateway(t *testing.T) {
+	b := &Bot{gateway: false}
+	if err := b.Close(); err != nil {
+		t.Fatal(err)
+	}
+}

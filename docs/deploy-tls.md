@@ -1,6 +1,6 @@
 # Deploy TLS (external reverse proxy)
 
-The daemon listens plain HTTP/WS. Terminate TLS in front (Caddy / nginx / Traefik).
+The daemon listens plain HTTP/WS. Terminate TLS in front (Caddy / nginx / Traefik). Dokku process split (one Discord gateway): [dokku.md](dokku.md).
 
 ## Caddy example
 

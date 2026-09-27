@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"database/sql"
+	"flag"
 	"log"
 	"log/slog"
 	"net/http"
@@ -11,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/alfred-identity/web/internal/appprocess"
 	"github.com/alfred-identity/web/internal/config"
 	"github.com/alfred-identity/web/internal/crypto"
 	"github.com/alfred-identity/web/internal/db"
@@ -27,7 +30,6 @@ import (
 func main() {
 	_ = godotenv.Load()
 
-	// Everything (stdlib log, goose, slog) → stdout so `docker compose logs` captures it.
 	log.SetOutput(os.Stdout)
 	log.SetFlags(log.LstdFlags | log.LUTC)
 
@@ -44,12 +46,24 @@ func main() {
 	logger := slog.New(logHandler)
 	slog.SetDefault(logger)
 
+	processFlag := flag.String("process", strings.TrimSpace(os.Getenv("PROCESS")), "web, discord, or all (default all)")
+	flag.Parse()
+	role, err := appprocess.ParseRole(*processFlag)
+	if err != nil {
+		logger.Error("process", "err", err)
+		os.Exit(1)
+	}
+
 	cfg, err := config.Load()
 	if err != nil {
 		logger.Error("config", "err", err)
 		os.Exit(1)
 	}
+	if role.WantsHTTP() {
+		cfg.ApplyPlatformPort()
+	}
 	logger.Info("config loaded",
+		"process", string(role),
 		"http_addr", cfg.HTTPAddr,
 		"ws_path", cfg.WSPath,
 		"discord_enabled", cfg.DiscordEnabled,
@@ -57,6 +71,11 @@ func main() {
 		"eq_login_upstream", cfg.EQLoginUpstream,
 		"log_level", level.String(),
 	)
+
+	if role.WantsDiscordGateway() && !cfg.DiscordEnabled {
+		logger.Error("discord process requires DISCORD_ENABLED=true")
+		os.Exit(1)
+	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
@@ -86,6 +105,38 @@ func main() {
 		logger.Error("default group", "err", err)
 		os.Exit(1)
 	}
+
+	var bot *discord.Bot
+	if cfg.DiscordEnabled && (role.WantsDiscordGateway() || role.WantsShareREST()) {
+		bot, err = discord.New(cfg, st, logger, role.WantsDiscordGateway())
+		if err != nil {
+			logger.Error("discord", "err", err)
+			os.Exit(1)
+		}
+		if role.WantsDiscordGateway() {
+			if err := bot.Open(); err != nil {
+				logger.Error("discord open", "err", err)
+				os.Exit(1)
+			}
+			logger.Info("discord gateway enabled", "guild_id", cfg.DiscordGuildID)
+		} else {
+			logger.Info("discord rest client enabled (share DMs; no gateway)")
+		}
+		defer bot.Close()
+	} else if !cfg.DiscordEnabled {
+		logger.Info("discord disabled (mock/CI mode)")
+	}
+
+	if role.WantsHTTP() {
+		runHTTP(ctx, cancel, cfg, sqlDB, st, bot, logger)
+	} else {
+		<-ctx.Done()
+	}
+
+	logger.Info("shutting down")
+}
+
+func runHTTP(ctx context.Context, cancel context.CancelFunc, cfg config.Config, sqlDB *sql.DB, st *store.Store, bot *discord.Bot, logger *slog.Logger) {
 	pres := presence.New(cfg.PresenceTTL)
 	hub := &sso.Hub{
 		Store:             st,
@@ -97,6 +148,9 @@ func main() {
 		Log:               logger,
 	}
 	hub.SetRatePerMin(cfg.LoginAuthRatePerMin)
+	if bot != nil {
+		hub.ShareNotifier = bot
+	}
 
 	metricsSampler := &metrics.Sampler{
 		Store: st,
@@ -114,27 +168,8 @@ func main() {
 	mux.HandleFunc("/health", httpapi.Health(func() bool {
 		return sqlDB.PingContext(context.Background()) == nil
 	}))
+	mux.HandleFunc("/open-alfred", web.HandleOpenAlfred)
 	mux.Handle(cfg.WSPath, hub)
-
-	var bot *discord.Bot
-	if cfg.DiscordEnabled {
-		bot, err = discord.New(cfg, st, logger)
-		if err != nil {
-			logger.Error("discord", "err", err)
-			os.Exit(1)
-		}
-		if err := bot.Open(); err != nil {
-			logger.Error("discord open", "err", err)
-			os.Exit(1)
-		}
-		if bot != nil {
-			hub.ShareNotifier = bot
-		}
-		defer bot.Close()
-		logger.Info("discord enabled", "guild_id", cfg.DiscordGuildID)
-	} else {
-		logger.Info("discord disabled (mock/CI mode)")
-	}
 
 	if cfg.WebEnabled {
 		sessionKey := cfg.WebSessionKey
@@ -180,7 +215,6 @@ func main() {
 	}()
 
 	<-ctx.Done()
-	logger.Info("shutting down")
 	shutdownCtx, c2 := context.WithTimeout(context.Background(), 10*time.Second)
 	defer c2()
 	_ = srv.Shutdown(shutdownCtx)

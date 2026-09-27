@@ -113,6 +113,15 @@ func Load() (Config, error) {
 	return cfg, nil
 }
 
+// ApplyPlatformPort sets HTTP_ADDR from PORT when a PaaS (Dokku/Heroku) injects it.
+func (c *Config) ApplyPlatformPort() {
+	port := strings.TrimSpace(os.Getenv("PORT"))
+	if port == "" {
+		return
+	}
+	c.HTTPAddr = "0.0.0.0:" + port
+}
+
 // NormalizeDiscordCommandPrefix lowercases and trims the slash-command name prefix.
 func NormalizeDiscordCommandPrefix(p string) string {
 	return strings.ToLower(strings.TrimSpace(p))

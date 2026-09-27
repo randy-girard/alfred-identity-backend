@@ -109,9 +109,9 @@ Additional Developer Portal steps:
 
 1. Bot appears **online** in the member list after `docker compose up` (or `./bin/daemon`)
 2. Slash commands appear: `/alfred-identity-sso`, `/alfred-identity-whoami` (or your prefix)
-3. `/alfred-identity-sso get` returns an SSO token and **Alfred Identity** source JSON
+3. `/alfred-identity-sso get` returns an **Open in Alfred Identity** button, the SSO token, and source JSON
 4. `/alfred-identity-whoami` shows your cached roles and account count
-5. Daemon logs: `discord ready`, `register command ok`
+5. Daemon logs: `discord ready` / `discord gateway enabled`, `register command ok`
 
 ---
 
@@ -122,7 +122,7 @@ Additional Developer Portal steps:
 | **Base** (default) | Anyone with a valid SSO token |
 | **Elevated** | SSO token **and** the Discord role set on that account |
 
-Users run `/alfred-identity-sso get` → paste JSON into **Alfred Identity**. Base accounts show up automatically.
+Users run `/alfred-identity-sso get` → **Open in Alfred Identity** (or paste JSON). Base accounts show up automatically.
 
 On the **Groups** tab in **Alfred Identity Management**, you can restrict who may use Discord slash commands (`/sso`, `/whoami`). When any group enables a command, only members of groups with that command can use it. Discord bootstrap admins and the configured admin role bypass restrictions.
 
@@ -139,7 +139,7 @@ Discord roles for elevated access are kept fresh automatically:
 ## Typical setup
 
 1. Admins add EQ accounts (and optional elevated roles) in the GUI or web admin
-2. Users run `/alfred-identity-sso get` and paste the token into **Alfred Identity**
+2. Users run `/alfred-identity-sso get` and click **Open in Alfred Identity** (or paste JSON)
 
 ## Commands (`DISCORD_COMMAND_PREFIX`, default `alfred-identity-`)
 

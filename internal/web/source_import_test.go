@@ -64,3 +64,38 @@ func TestBuildSourceImportJSON(t *testing.T) {
 		t.Fatal("expected default notes")
 	}
 }
+
+func TestEncodeParseSourceDeepLinkPayload(t *testing.T) {
+	d, err := EncodeSourceDeepLinkPayload("Guild", "identity.example.com", "secret-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := ParseSourceDeepLinkPayload(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Name != "Guild" || got.Host != "identity.example.com" || got.Token != "secret-token" {
+		t.Fatalf("%+v", got)
+	}
+	appURL, err := EncodeAppSchemeURL("Guild", "identity.example.com", "secret-token")
+	if err != nil || appURL != AppURLScheme+"://import?d="+d {
+		t.Fatalf("app URL %q err=%v", appURL, err)
+	}
+}
+
+func TestOpenAlfredURL(t *testing.T) {
+	if OpenAlfredURL("", "n", "h", "t") != "" {
+		t.Fatal("empty public URL")
+	}
+	got := OpenAlfredURL("https://identity.example.com/", "Guild", "identity.example.com", "tok")
+	if got == "" || got[:len("https://identity.example.com/open-alfred?d=")] != "https://identity.example.com/open-alfred?d=" {
+		t.Fatalf("got %q", got)
+	}
+	btn := DiscordOpenAlfredButtonURL("https://identity.example.com", "Guild", "identity.example.com", "tok")
+	if btn == "" {
+		t.Fatal("expected button URL")
+	}
+	if _, err := EncodeSourceDeepLinkPayload("", "h", "t"); err == nil {
+		t.Fatal("expected error")
+	}
+}

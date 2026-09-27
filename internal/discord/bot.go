@@ -27,9 +27,10 @@ type Bot struct {
 	syncStop chan struct{}
 	syncWG   sync.WaitGroup
 	syncMu   sync.Mutex // serializes full role syncs
+	gateway  bool
 }
 
-func New(cfg config.Config, st *store.Store, log *slog.Logger) (*Bot, error) {
+func New(cfg config.Config, st *store.Store, log *slog.Logger, gateway bool) (*Bot, error) {
 	s, err := discordgo.New("Bot " + cfg.DiscordToken)
 	if err != nil {
 		return nil, err
@@ -41,14 +42,17 @@ func New(cfg config.Config, st *store.Store, log *slog.Logger) (*Bot, error) {
 		Cfg:      cfg,
 		Log:      log,
 		syncStop: make(chan struct{}),
+		gateway:  gateway,
 	}
-	s.AddHandler(b.onReady)
-	s.AddHandler(b.onInteraction)
-	s.AddHandler(b.onGuildMemberUpdate)
-	s.AddHandler(b.onGuildMemberRemove)
-	s.AddHandler(b.onGuildRoleCreate)
-	s.AddHandler(b.onGuildRoleUpdate)
-	s.AddHandler(b.onGuildRoleDelete)
+	if gateway {
+		s.AddHandler(b.onReady)
+		s.AddHandler(b.onInteraction)
+		s.AddHandler(b.onGuildMemberUpdate)
+		s.AddHandler(b.onGuildMemberRemove)
+		s.AddHandler(b.onGuildRoleCreate)
+		s.AddHandler(b.onGuildRoleUpdate)
+		s.AddHandler(b.onGuildRoleDelete)
+	}
 	return b, nil
 }
 
@@ -67,6 +71,12 @@ func (b *Bot) Open() error {
 }
 
 func (b *Bot) Close() error {
+	if b == nil {
+		return nil
+	}
+	if !b.gateway || b.Session == nil {
+		return nil
+	}
 	select {
 	case <-b.syncStop:
 	default:
@@ -274,7 +284,7 @@ func commandDefs(prefix string) []*discordgo.ApplicationCommand {
 			Name:        prefix + "sso",
 			Description: "SSO API tokens",
 			Options: []*discordgo.ApplicationCommandOption{
-				{Type: discordgo.ApplicationCommandOptionSubCommand, Name: "get", Description: "Get or create your SSO token and " + web.DesktopAppName + " source JSON"},
+				{Type: discordgo.ApplicationCommandOptionSubCommand, Name: "get", Description: "Get or create your SSO token and open " + web.DesktopAppName},
 				{Type: discordgo.ApplicationCommandOptionSubCommand, Name: "revoke", Description: "Revoke your SSO token",
 					Options: []*discordgo.ApplicationCommandOption{
 						{Type: discordgo.ApplicationCommandOptionInteger, Name: "id", Description: "Token id (optional; defaults to your active token)", Required: false},
@@ -456,11 +466,31 @@ func (b *Bot) handleSSO(ctx context.Context, s *discordgo.Session, i *discordgo.
 		name := web.SourceNameFromConfig(b.Cfg)
 		host := web.SourceHostFromConfig(b.Cfg)
 		jsonSnippet := web.BuildSourceImportJSON(name, host, secret, "")
-		desc := "Keep this private. Paste the JSON into " + web.DesktopAppName + " → Connections → Add from JSON."
+		openURL := web.DiscordOpenAlfredButtonURL(b.Cfg.WebPublicURL, name, host, secret)
+		desc := "Keep this private. Click **Open in " + web.DesktopAppName + "**. If the button does not work, copy the JSON below into Connections → Add from JSON."
 		if created {
-			desc = "New SSO token created (one per Discord user). Paste the JSON into " + web.DesktopAppName + " → Connections → Add from JSON."
+			desc = "New SSO token created (one per Discord user). Click **Open in " + web.DesktopAppName + "**. If the button does not work, copy the JSON below into Connections → Add from JSON."
 		}
-		b.respondEmbed(s, i, &discordgo.MessageEmbed{
+		if openURL != "" {
+			desc += "\n\n[Open in " + web.DesktopAppName + "](" + openURL + ")"
+		} else if strings.TrimSpace(b.Cfg.WebPublicURL) == "" {
+			desc += "\n\nAsk a guild admin to set `WEB_PUBLIC_URL` if you want a one-click Open button."
+		}
+		var components []discordgo.MessageComponent
+		if openURL != "" {
+			components = []discordgo.MessageComponent{
+				discordgo.ActionsRow{
+					Components: []discordgo.MessageComponent{
+						discordgo.Button{
+							Style: discordgo.LinkButton,
+							Label: "Open in " + web.DesktopAppName,
+							URL:   openURL,
+						},
+					},
+				},
+			}
+		}
+		b.respondMessage(s, i, &discordgo.MessageEmbed{
 			Title:       "Your SSO token",
 			Description: desc,
 			Color:       colorOK,
@@ -468,7 +498,7 @@ func (b *Bot) handleSSO(ctx context.Context, s *discordgo.Session, i *discordgo.
 				{Name: "Secret", Value: fmt.Sprintf("```\n%s\n```", secret), Inline: false},
 				{Name: web.DesktopAppName + " source", Value: fmt.Sprintf("```json\n%s\n```", jsonSnippet), Inline: false},
 			},
-		})
+		}, components)
 	}
 }
 
@@ -510,12 +540,18 @@ func (b *Bot) respondErr(s *discordgo.Session, i *discordgo.InteractionCreate, m
 }
 
 func (b *Bot) respondEmbed(s *discordgo.Session, i *discordgo.InteractionCreate, emb *discordgo.MessageEmbed) {
+	b.respondMessage(s, i, emb, nil)
+}
+
+func (b *Bot) respondMessage(s *discordgo.Session, i *discordgo.InteractionCreate, emb *discordgo.MessageEmbed, components []discordgo.MessageComponent) {
+	data := &discordgo.InteractionResponseData{
+		Flags:      discordgo.MessageFlagsEphemeral,
+		Embeds:     []*discordgo.MessageEmbed{emb},
+		Components: components,
+	}
 	if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
-			Flags:  discordgo.MessageFlagsEphemeral,
-			Embeds: []*discordgo.MessageEmbed{emb},
-		},
+		Data: data,
 	}); err != nil {
 		b.Log.Error("discord respond", "err", err)
 	}
